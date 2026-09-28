@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
             "Övrigt"
           ] 
         },
-        brand: { type: SchemaType.STRING, description: "Märke/Tillverkare, t.ex. 'Husqvarna'" },
+        brand: { type: SchemaType.STRING, description: "Märke/Tillverkare" },
         model: { type: SchemaType.STRING, description: "Modellserie eller specifik beteckning" },
         estimated_replacement_cost_sek: { 
           type: SchemaType.NUMBER, 
@@ -83,65 +83,65 @@ export async function POST(req: NextRequest) {
     const prompt = `
 Du är en auktoriserad besiktningsman och värderingsexpert för svenska försäkringsbolag.
 Analysera föremålet på bilden noggrant:
-1. Identifiera fabrikat och modell. Om det är en tvättpelare med två maskiner, fokusera på den översta maskinen (torktumlaren).
+1. Identifiera fabrikat och modell. Om det finns flera föremål, fokusera på det mest framträdande huvudföremålet.
 2. Ange realistiska marknadspriser i Svenska Kronor (SEK).
 3. Var konservativ i värderingen men realistisk.
-4. Ange var typskylt/serienummer vanligen sitter (t.ex. på luckans innerkant eller baksidan).
+4. Ange var typskylt/serienummer vanligen sitter på denna typ av produkt.
 Svara uteslutande med det definierade JSON-schemat.
 `;
 
-    // De tre modeller som faktiskt är aktiva i ditt Google-konto
-    const activeModels = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.1-pro"];
+    const model = genAI.getGenerativeModel({
+      model: "gemini-3.8-flash",
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: responseSchema as any,
+      },
+    });
+
+    const maxRetries = 3;
+    let parsedData: any = null;
     let lastError: any = null;
-    let parsedData = null;
 
-    for (const modelName of activeModels) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const model = genAI.getGenerativeModel({
-          model: modelName,
-          generationConfig: {
-            responseMimeType: "application/json",
-            responseSchema: responseSchema as any,
+        console.log(`Försöker anropa gemini-3.8-flash (försök ${attempt}/${maxRetries})...`);
+        const result = await model.generateContent([
+          prompt,
+          {
+            inlineData: {
+              data: base64Image,
+              mimeType: mimeType || "image/jpeg",
+            },
           },
-        });
+        ]);
 
-        // Kör anropet med intern retry om modellen har en tillfällig trafiktopp (503)
-        let attemptResult: any = null;
-        for (let attempt = 1; attempt <= 2; attempt++) {
-          try {
-            attemptResult = await model.generateContent([
-              prompt,
-              {
-                inlineData: {
-                  data: base64Image,
-                  mimeType: mimeType || "image/jpeg",
-                },
-              },
-            ]);
-            break;
-          } catch (innerErr: any) {
-            const is503 = innerErr?.message?.includes("503") || innerErr?.status === 503;
-            if (is503 && attempt === 1) {
-              await new Promise((r) => setTimeout(r, 2500));
-              continue;
-            }
-            throw innerErr;
-          }
-        }
-
-        if (attemptResult) {
-          parsedData = JSON.parse(attemptResult.response.text());
-          console.log(`Analys genomförd framgångsrikt med: ${modelName}`);
-          break;
-        }
+        const textResponse = result.response.text();
+        parsedData = JSON.parse(textResponse);
+        if (parsedData) break;
       } catch (err: any) {
         lastError = err;
-        console.warn(`Modell ${modelName} misslyckades:`, err?.message?.substring(0, 100));
+        const errMsg = err?.message || String(err);
+        const isTemporary = errMsg.includes("503") || errMsg.includes("high demand") || errMsg.includes("ResourceExhausted") || err?.status === 503;
+
+        console.warn(`Försök ${attempt} misslyckades:`, errMsg.substring(0, 120));
+
+        if (isTemporary && attempt < maxRetries) {
+          // Vänta längre för varje försök (2s, 4s)
+          const waitMs = attempt * 2000;
+          console.log(`Väntar ${waitMs}ms innan nytt försök på grund av kö hos Google...`);
+          await new Promise((resolve) => setTimeout(resolve, waitMs));
+        } else if (!isTemporary) {
+          // Om felet inte är körelaterat (t.ex. ogiltig API-nyckel), avbryt direkt
+          break;
+        }
       }
     }
 
     if (!parsedData) {
-      throw lastError || new Error("Kunde inte få svar från AI-tjänsten.");
+      const errorText = lastError?.message?.includes("503")
+        ? "Googles gratisservrar har tillfälligt hög efterfrågan. Vänta 5-10 sekunder och tryck på 'Försök igen'."
+        : (lastError?.message || "Kunde inte tolka bilden.");
+      return NextResponse.json({ success: false, error: errorText }, { status: 503 });
     }
 
     return NextResponse.json({ success: true, data: parsedData });
