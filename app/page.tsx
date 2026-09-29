@@ -26,7 +26,13 @@ import {
   MapPin,
   Building2,
   ChevronDown,
-  AlertTriangle
+  AlertTriangle,
+  Receipt,
+  Clock,
+  CalendarCheck,
+  ShoppingBag,
+  Copy,
+  Check
 } from "lucide-react";
 import { sanitizeAndCompressImage } from "@/lib/sanitizeImage";
 import { supabase } from "@/lib/supabaseClient";
@@ -85,7 +91,52 @@ interface VaultItem {
   image_path?: string;
   photo_path?: string;
   imageUrl?: string;
+  receipt_path?: string;
+  receiptUrl?: string;
+  purchase_date?: string;
+  purchase_store?: string;
+  purchase_price_sek?: number;
+  warranty_months?: number;
   created_at: string;
+}
+
+function getWarrantyStatus(purchaseDateStr?: string, warrantyMonths: number = 36) {
+  if (!purchaseDateStr) return null;
+  const pDate = new Date(purchaseDateStr);
+  if (isNaN(pDate.getTime())) return null;
+
+  const now = new Date();
+  const expiryDate = new Date(pDate);
+  expiryDate.setMonth(expiryDate.getMonth() + warrantyMonths);
+
+  const diffMs = expiryDate.getTime() - now.getTime();
+  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  const diffMonths = Math.ceil(diffDays / 30);
+
+  if (diffDays <= 0) {
+    return {
+      status: "expired",
+      label: "Garantin har löpt ut",
+      expiryDate: expiryDate.toLocaleDateString("sv-SE"),
+      badgeColor: "bg-slate-100 text-slate-500",
+    };
+  }
+
+  if (diffMonths <= 2) {
+    return {
+      status: "expiring_soon",
+      label: `Löper ut om ${diffDays} dagar!`,
+      expiryDate: expiryDate.toLocaleDateString("sv-SE"),
+      badgeColor: "bg-amber-100 text-amber-800 border border-amber-300",
+    };
+  }
+
+  return {
+    status: "active",
+    label: `Aktiv garanti (${diffMonths} mån kvar)`,
+    expiryDate: expiryDate.toLocaleDateString("sv-SE"),
+    badgeColor: "bg-emerald-50 text-emerald-800 border border-emerald-200",
+  };
 }
 
 export default function HomePage() {
@@ -107,7 +158,7 @@ export default function HomePage() {
   const [isSaving, setIsSaving] = useState(false);
   const [result, setResult] = useState<ItemAnalysisResult | null>(null);
 
-  // Rumsval (Standard + Egna rum)
+  // Rumsval
   const [selectedRoomForSave, setSelectedRoomForSave] = useState<string>("Vardagsrum");
   const [customRooms, setCustomRooms] = useState<string[]>([]);
   const [isAddingCustomRoom, setIsAddingCustomRoom] = useState(false);
@@ -133,11 +184,21 @@ export default function HomePage() {
   const [activeFilter, setActiveFilter] = useState<string>("Alla");
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
 
-  // Detalj- och redigeringsmodal
+  // Detalj- och kvittohantering
   const [editingItem, setEditingItem] = useState<VaultItem | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [isAnalyzingReceipt, setIsAnalyzingReceipt] = useState(false);
+  const [viewingReceiptUrl, setViewingReceiptUrl] = useState<string | null>(null);
+
+  // Blocket & Tradera-annonser
+  const [listingModalItem, setListingModalItem] = useState<VaultItem | null>(null);
+  const [listingData, setListingData] = useState<any>(null);
+  const [isGeneratingListing, setIsGeneratingListing] = useState(false);
+  const [activeListingTab, setActiveListingTab] = useState<"blocket" | "tradera">("blocket");
+  const [copiedText, setCopiedText] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const receiptInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const initSession = async () => {
@@ -187,7 +248,6 @@ export default function HomePage() {
         fetchVaultStats(userId, current.id);
         fetchVaultItems(userId, current.id);
       } else {
-        // Skapa första standardbostaden om ingen finns
         const { data: newProp } = await supabase
           .from("properties")
           .insert({
@@ -256,9 +316,19 @@ export default function HomePage() {
                 .createSignedUrl(rawPath, 3600);
               signed = urlData?.signedUrl || "";
             }
+
+            let receiptSigned = "";
+            if (item.receipt_path) {
+              const { data: rUrlData } = await supabase.storage
+                .from("item-photos")
+                .createSignedUrl(item.receipt_path, 3600);
+              receiptSigned = rUrlData?.signedUrl || "";
+            }
+
             return {
               ...item,
               imageUrl: signed,
+              receiptUrl: receiptSigned,
             };
           })
         );
@@ -293,6 +363,9 @@ export default function HomePage() {
       if (pathToDelete) {
         await supabase.storage.from("item-photos").remove([pathToDelete]);
       }
+      if (item.receipt_path) {
+        await supabase.storage.from("item-photos").remove([item.receipt_path]);
+      }
 
       setVaultItems((prev) => prev.filter((i) => i.id !== item.id));
       if (editingItem?.id === item.id) {
@@ -325,6 +398,11 @@ export default function HomePage() {
           market_value_sek: Number(editingItem.market_value_sek),
           serial_number: editingItem.serial_number || "",
           notes: editingItem.notes || "",
+          purchase_date: editingItem.purchase_date || null,
+          purchase_store: editingItem.purchase_store || null,
+          purchase_price_sek: editingItem.purchase_price_sek ? Number(editingItem.purchase_price_sek) : null,
+          warranty_months: editingItem.warranty_months ? Number(editingItem.warranty_months) : 36,
+          receipt_path: editingItem.receipt_path || null,
         })
         .eq("id", editingItem.id);
 
@@ -340,6 +418,109 @@ export default function HomePage() {
     } finally {
       setIsUpdating(false);
     }
+  };
+
+  // Kvitto-uppladdning och AI-tolkning
+  const handleReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !editingItem || !sessionUser) return;
+
+    setIsAnalyzingReceipt(true);
+    try {
+      const processed = await sanitizeAndCompressImage(file);
+
+      const byteCharacters = atob(processed.base64ForGemini);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: "image/jpeg" });
+      const receiptFileName = `${sessionUser.id}/receipt-${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("item-photos")
+        .upload(receiptFileName, blob, { contentType: "image/jpeg", upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      const res = await fetch("/api/analyze-receipt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          base64Image: processed.base64ForGemini,
+          mimeType: processed.mimeType,
+        }),
+      });
+
+      const response = await res.json();
+      if (response.success && response.data) {
+        const rData = response.data;
+        setEditingItem((prev) =>
+          prev
+            ? {
+                ...prev,
+                receipt_path: receiptFileName,
+                receiptUrl: processed.previewUrl,
+                purchase_date: rData.purchase_date || prev.purchase_date,
+                purchase_store: rData.store || prev.purchase_store,
+                purchase_price_sek: rData.total_amount_sek || prev.purchase_price_sek,
+                warranty_months: rData.suggested_warranty_months || 36,
+              }
+            : null
+        );
+      } else {
+        setEditingItem((prev) =>
+          prev
+            ? {
+                ...prev,
+                receipt_path: receiptFileName,
+                receiptUrl: processed.previewUrl,
+              }
+            : null
+        );
+      }
+    } catch (err: any) {
+      alert(`Kunde inte analysera kvitto: ${err.message}`);
+    } finally {
+      setIsAnalyzingReceipt(false);
+      if (receiptInputRef.current) receiptInputRef.current.value = "";
+    }
+  };
+
+  // Skapa säljannons med Gemini
+  const handleOpenListingModal = async (item: VaultItem) => {
+    setListingModalItem(item);
+    setListingData(null);
+    setIsGeneratingListing(true);
+    setCopiedText(null);
+
+    try {
+      const res = await fetch("/api/generate-listing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(item),
+      });
+
+      const response = await res.json();
+      if (response.success && response.data) {
+        setListingData(response.data);
+      } else {
+        alert(response.error || "Kunde inte generera säljannons.");
+        setListingModalItem(null);
+      }
+    } catch (err: any) {
+      alert(`Ett fel uppstod: ${err.message}`);
+      setListingModalItem(null);
+    } finally {
+      setIsGeneratingListing(false);
+    }
+  };
+
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedText(label);
+    setTimeout(() => setCopiedText(null), 2500);
   };
 
   const handleImageCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -519,12 +700,11 @@ export default function HomePage() {
     }
   };
 
-  // Dynamisk lista över rum
+  // Rumslista & Filter
   const allAvailableRooms = Array.from(
     new Set([...STANDARD_ROOMS, ...customRooms, ...(vaultItems.map((i) => i.room).filter(Boolean) as string[])])
   );
 
-  // Filtreringslogik
   const roomFilters = ["Alla", ...Array.from(new Set(vaultItems.map((i) => i.room || "Ospecificerat")))];
   const categoryFilters = ["Alla", ...Array.from(new Set(vaultItems.map((i) => i.category)))];
   const currentFilterList = selectedFilterType === "room" ? roomFilters : categoryFilters;
@@ -625,12 +805,20 @@ export default function HomePage() {
         )}
       </header>
 
+      {/* Dolda filinputs */}
       <input
         ref={fileInputRef}
         type="file"
         accept="image/*"
         capture="environment"
         onChange={handleImageCapture}
+        className="hidden"
+      />
+      <input
+        ref={receiptInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleReceiptUpload}
         className="hidden"
       />
 
@@ -791,12 +979,12 @@ export default function HomePage() {
                   </div>
                 </div>
 
-                {/* VÄLJ RUM INNAN DU SPARAR */}
+                {/* VÄLJ RUM */}
                 <div className="space-y-1.5 pt-1">
                   <div className="flex items-center justify-between">
                     <label className="text-[11px] font-bold text-slate-600 flex items-center space-x-1">
                       <Home className="w-3.5 h-3.5 text-indigo-600" />
-                      <span>Placering / Rum i {selectedProperty?.name || "bostaden"}:</span>
+                      <span>Placering i {selectedProperty?.name || "bostaden"}:</span>
                     </label>
                     {!isAddingCustomRoom && (
                       <button
@@ -927,7 +1115,7 @@ export default function HomePage() {
                 Krypterad inventarieförteckning redo för försäkringsanspråk och andrahandsmarknad.
               </p>
 
-              {/* Underförsäkringskoll & Försäkringstak */}
+              {/* Underförsäkringskoll */}
               {selectedProperty && (
                 <div className="pt-3 border-t border-indigo-800/80 mt-2 space-y-1.5">
                   <div className="flex justify-between items-center text-xs">
@@ -973,7 +1161,7 @@ export default function HomePage() {
             </button>
           )}
 
-          {/* FILTERTYP-VÄXLARE (Rum vs Kategori) */}
+          {/* FILTERTYP-VÄXLARE */}
           {vaultItems.length > 0 && (
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs">
@@ -1048,88 +1236,105 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* Föremålslista */}
+          {/* Föremålslista (Rent och avskalat utan externa annonsknappar) */}
           {!isLoadingVault && filteredItems.length > 0 && (
             <div className="space-y-4">
-              {filteredItems.map((item) => (
-                <div
-                  key={item.id}
-                  onClick={() => setEditingItem({ ...item })}
-                  className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-sm hover:shadow-md hover:border-indigo-300 transition cursor-pointer space-y-3"
-                >
-                  <div className="flex space-x-3.5">
-                    <div className="w-20 h-20 rounded-xl bg-slate-100 flex-shrink-0 overflow-hidden relative border border-slate-100">
-                      {item.imageUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={item.imageUrl} alt={item.title} className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-slate-300">
-                          <Tag className="w-6 h-6" />
-                        </div>
-                      )}
-                    </div>
+              {filteredItems.map((item) => {
+                const wStatus = getWarrantyStatus(item.purchase_date, item.warranty_months || 36);
 
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center space-x-1.5 flex-wrap gap-y-1">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">
-                          {item.category}
-                        </span>
-                        <span className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded flex items-center space-x-1">
-                          <MapPin className="w-2.5 h-2.5 text-slate-400 inline" />
-                          <span>{item.room || "Ospecificerat"}</span>
-                        </span>
-                        {item.serial_number && (
-                          <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">
-                            S/N ✓
-                          </span>
+                return (
+                  <div
+                    key={item.id}
+                    onClick={() => setEditingItem({ ...item })}
+                    className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-sm hover:shadow-md hover:border-indigo-300 transition cursor-pointer space-y-3"
+                  >
+                    <div className="flex space-x-3.5">
+                      <div className="w-20 h-20 rounded-xl bg-slate-100 flex-shrink-0 overflow-hidden relative border border-slate-100">
+                        {item.imageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={item.imageUrl} alt={item.title} className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-slate-300">
+                            <Tag className="w-6 h-6" />
+                          </div>
                         )}
                       </div>
-                      <h3 className="font-bold text-slate-900 text-sm mt-1 truncate">
-                        {item.title}
-                      </h3>
-                      <p className="text-xs text-slate-500 truncate">
-                        {item.brand} {item.model ? `• ${item.model}` : ""}
-                      </p>
-                      <div className="flex items-center space-x-2 mt-1">
-                        <span className="text-[11px] font-bold text-slate-800">
-                          {Number(item.estimated_replacement_cost_sek).toLocaleString("sv-SE")} kr
-                        </span>
-                        <span className="text-[11px] text-slate-400">• Beg. {Number(item.market_value_sek).toLocaleString("sv-SE")} kr</span>
+
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center space-x-1.5 flex-wrap gap-y-1">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">
+                            {item.category}
+                          </span>
+                          <span className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded flex items-center space-x-1">
+                            <MapPin className="w-2.5 h-2.5 text-slate-400 inline" />
+                            <span>{item.room || "Ospecificerat"}</span>
+                          </span>
+                          {item.receipt_path && (
+                            <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded flex items-center space-x-0.5">
+                              <Receipt className="w-2.5 h-2.5 inline" />
+                              <span>Kvitto ✓</span>
+                            </span>
+                          )}
+                        </div>
+                        <h3 className="font-bold text-slate-900 text-sm mt-1 truncate">
+                          {item.title}
+                        </h3>
+                        <p className="text-xs text-slate-500 truncate">
+                          {item.brand} {item.model ? `• ${item.model}` : ""}
+                        </p>
+                        <div className="flex items-center space-x-2 mt-1">
+                          <span className="text-[11px] font-bold text-slate-800">
+                            {Number(item.estimated_replacement_cost_sek).toLocaleString("sv-SE")} kr
+                          </span>
+                          <span className="text-[11px] text-slate-400">• Beg. {Number(item.market_value_sek).toLocaleString("sv-SE")} kr</span>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={(e) => handleDeleteItem(e, item)}
+                        disabled={deletingItemId === item.id}
+                        className="text-slate-300 hover:text-rose-500 p-1 self-start transition"
+                        title="Ta bort från valv"
+                      >
+                        {deletingItemId === item.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin text-rose-500" />
+                        ) : (
+                          <Trash2 className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Garantistatus bricka */}
+                    {wStatus && (
+                      <div className={`rounded-xl px-2.5 py-1 text-[11px] font-semibold flex items-center justify-between ${wStatus.badgeColor}`}>
+                        <div className="flex items-center space-x-1.5">
+                          <Clock className="w-3.5 h-3.5" />
+                          <span>{wStatus.label}</span>
+                        </div>
+                        <span className="text-[10px] opacity-75">T.o.m. {wStatus.expiryDate}</span>
+                      </div>
+                    )}
+
+                    {/* Rent bottenfält */}
+                    <div className="bg-slate-50 rounded-xl p-2.5 text-[11px] text-slate-600 flex justify-between items-center border border-slate-100">
+                      <div>
+                        <span className="text-slate-400">Skick: </span>
+                        <span className="font-semibold text-slate-800">{item.condition || "Gott"}</span>
+                      </div>
+                      <div className="text-right text-indigo-600 font-medium text-[11px] flex items-center space-x-1">
+                        <Edit3 className="w-3 h-3" />
+                        <span>Klicka för kvitto & detaljer</span>
                       </div>
                     </div>
-
-                    <button
-                      onClick={(e) => handleDeleteItem(e, item)}
-                      disabled={deletingItemId === item.id}
-                      className="text-slate-300 hover:text-rose-500 p-1 self-start transition"
-                      title="Ta bort från valv"
-                    >
-                      {deletingItemId === item.id ? (
-                        <Loader2 className="w-4 h-4 animate-spin text-rose-500" />
-                      ) : (
-                        <Trash2 className="w-4 h-4" />
-                      )}
-                    </button>
                   </div>
-
-                  <div className="bg-slate-50 rounded-xl p-2.5 text-[11px] text-slate-600 flex justify-between items-center border border-slate-100">
-                    <div>
-                      <span className="text-slate-400">Skick: </span>
-                      <span className="font-semibold text-slate-800">{item.condition || "Gott"}</span>
-                    </div>
-                    <div className="text-right text-indigo-600 font-medium text-[11px] flex items-center space-x-1">
-                      <Edit3 className="w-3 h-3" />
-                      <span>Klicka för detaljer</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
       )}
 
-      {/* DETALJ- OCH REDIGERINGSMODAL */}
+      {/* DETALJ- OCH KVITTOMODAL */}
       {editingItem && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in overflow-y-auto">
           <div className="bg-white rounded-3xl p-5 w-full max-w-md shadow-2xl border border-slate-100 space-y-4 my-8 max-h-[90vh] overflow-y-auto">
@@ -1147,11 +1352,120 @@ export default function HomePage() {
             </div>
 
             {editingItem.imageUrl && (
-              <div className="w-full h-48 rounded-2xl overflow-hidden bg-slate-100 border border-slate-200/80">
+              <div className="w-full h-44 rounded-2xl overflow-hidden bg-slate-100 border border-slate-200/80">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={editingItem.imageUrl} alt={editingItem.title} className="w-full h-full object-cover" />
               </div>
             )}
+
+            {/* KNAPP: SKAPA SÄLJANNONS (Inne i föremålet) */}
+            <button
+              type="button"
+              onClick={() => handleOpenListingModal(editingItem)}
+              className="w-full py-2.5 px-4 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200/80 rounded-2xl font-bold text-xs flex items-center justify-center space-x-2 transition active:scale-98 shadow-xs"
+            >
+              <ShoppingBag className="w-4 h-4 text-indigo-600" />
+              <span>Skapa säljannons (Blocket / Tradera)</span>
+            </button>
+
+            {/* SEKTION: KVITTO & GARANTIVAKT */}
+            <div className="bg-gradient-to-br from-indigo-50/70 to-slate-50 p-3.5 rounded-2xl border border-indigo-100 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-1.5 text-xs font-bold text-indigo-950">
+                  <Receipt className="w-4 h-4 text-indigo-600" />
+                  <span>Kvitto & Garantivakt</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => receiptInputRef.current?.click()}
+                  disabled={isAnalyzingReceipt}
+                  className="px-2.5 py-1 bg-indigo-600 text-white text-[11px] font-bold rounded-lg hover:bg-indigo-700 transition flex items-center space-x-1"
+                >
+                  {isAnalyzingReceipt ? (
+                    <>
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      <span>Tolkar kvitto...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Camera className="w-3 h-3" />
+                      <span>{editingItem.receipt_path ? "Byt kvitto" : "Fota kvitto"}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {editingItem.receiptUrl && (
+                <div className="flex items-center space-x-2 text-xs text-indigo-900 bg-white/80 p-2.5 rounded-xl border border-indigo-100 justify-between">
+                  <div className="flex items-center space-x-2 truncate">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                    <span className="truncate font-medium">Kvitto sparat i valvet</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setViewingReceiptUrl(editingItem.receiptUrl || null)}
+                    className="text-indigo-600 font-bold underline text-xs flex-shrink-0 hover:text-indigo-800"
+                  >
+                    Visa kvitto
+                  </button>
+                </div>
+              )}
+
+              {/* Formulärfält för kvitto/garanti */}
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <label className="text-[10px] font-semibold text-slate-500 block mb-0.5">Inköpt datum</label>
+                  <input
+                    type="date"
+                    value={editingItem.purchase_date || ""}
+                    onChange={(e) => setEditingItem({ ...editingItem, purchase_date: e.target.value })}
+                    className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-xl bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold text-slate-500 block mb-0.5">Inköpsbutik</label>
+                  <input
+                    type="text"
+                    placeholder="t.ex. Elgiganten"
+                    value={editingItem.purchase_store || ""}
+                    onChange={(e) => setEditingItem({ ...editingItem, purchase_store: e.target.value })}
+                    className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-xl bg-white"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <label className="text-[10px] font-semibold text-slate-500 block mb-0.5">Faktiskt köppris (SEK)</label>
+                  <input
+                    type="number"
+                    placeholder="Enligt kvitto"
+                    value={editingItem.purchase_price_sek || ""}
+                    onChange={(e) => setEditingItem({ ...editingItem, purchase_price_sek: Number(e.target.value) })}
+                    className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-xl bg-white font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold text-slate-500 block mb-0.5">Garanti / Reklamation</label>
+                  <select
+                    value={editingItem.warranty_months || 36}
+                    onChange={(e) => setEditingItem({ ...editingItem, warranty_months: Number(e.target.value) })}
+                    className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-xl bg-white"
+                  >
+                    <option value={12}>1 år (12 mån)</option>
+                    <option value={24}>2 år (24 mån)</option>
+                    <option value={36}>3 år (Konsumentköplagen)</option>
+                    <option value={60}>5 år (Förlängd)</option>
+                    <option value={120}>10 år (Trygghet)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-1.5 text-[10px] text-slate-500 pt-0.5">
+                <CalendarCheck className="w-3.5 h-3.5 text-indigo-500" />
+                <span>Konsumentköplagen ger dig alltid 3 års lagstadgad reklamationsrätt i Sverige.</span>
+              </div>
+            </div>
 
             <form onSubmit={handleSaveItemUpdates} className="space-y-3.5 text-xs">
               <div>
@@ -1165,7 +1479,6 @@ export default function HomePage() {
                 />
               </div>
 
-              {/* Rumsval i modalen */}
               <div>
                 <label className="font-semibold text-slate-600 block mb-1">Rum / Placering</label>
                 <select
@@ -1241,10 +1554,10 @@ export default function HomePage() {
               </div>
 
               <div>
-                <label className="font-semibold text-slate-600 block mb-1">Egna anteckningar (inköpsdatum, kvitto etc)</label>
+                <label className="font-semibold text-slate-600 block mb-1">Egna anteckningar</label>
                 <textarea
                   rows={2}
-                  placeholder="t.ex. Inköpt på Elgiganten 2024. Garanti till 2027."
+                  placeholder="t.ex. Tillbehör, garantianteckningar etc."
                   value={editingItem.notes || ""}
                   onChange={(e) => setEditingItem({ ...editingItem, notes: e.target.value })}
                   className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -1276,7 +1589,228 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* BOSTADS-MODAL (Växla eller Redigera) */}
+      {/* SÄLJANNONS-MODAL (Blocket & Tradera) */}
+      {listingModalItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in overflow-y-auto">
+          <div className="bg-white rounded-3xl p-5 w-full max-w-md shadow-2xl border border-slate-100 space-y-4 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-1 border-b border-slate-100">
+              <h3 className="font-bold text-base text-slate-900 flex items-center space-x-2">
+                <ShoppingBag className="w-4 h-4 text-indigo-600" />
+                <span>AI-genererad Säljannons</span>
+              </h3>
+              <button
+                onClick={() => setListingModalItem(null)}
+                className="p-1 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {isGeneratingListing && (
+              <div className="py-12 text-center space-y-3">
+                <Loader2 className="w-8 h-8 animate-spin mx-auto text-indigo-600" />
+                <p className="text-xs text-slate-500 font-medium">
+                  Gemini formulerar en säljande annons anpassad för Blocket & Tradera...
+                </p>
+              </div>
+            )}
+
+            {!isGeneratingListing && listingData && (
+              <div className="space-y-4">
+                {/* Flikar: Blocket vs Tradera */}
+                <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-semibold">
+                  <button
+                    onClick={() => setActiveListingTab("blocket")}
+                    className={`flex-1 py-1.5 rounded-lg transition ${
+                      activeListingTab === "blocket" ? "bg-white text-indigo-600 shadow-xs" : "text-slate-500"
+                    }`}
+                  >
+                    Blocket / Marketplace
+                  </button>
+                  <button
+                    onClick={() => setActiveListingTab("tradera")}
+                    className={`flex-1 py-1.5 rounded-lg transition ${
+                      activeListingTab === "tradera" ? "bg-white text-indigo-600 shadow-xs" : "text-slate-500"
+                    }`}
+                  >
+                    Tradera (Auktion)
+                  </button>
+                </div>
+
+                {activeListingTab === "blocket" ? (
+                  <div className="space-y-3 text-xs">
+                    <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200/80 space-y-1">
+                      <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        <span>Föreslaget pris</span>
+                        <span>Fast pris</span>
+                      </div>
+                      <div className="text-2xl font-extrabold text-slate-900">
+                        {Number(listingData.suggested_price_sek).toLocaleString("sv-SE")} kr
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center">
+                        <label className="font-semibold text-slate-600">Rubrik:</label>
+                        <button
+                          onClick={() => copyToClipboard(listingData.blocket_title, "rubrik")}
+                          className="text-[11px] text-indigo-600 font-bold hover:underline flex items-center space-x-1"
+                        >
+                          {copiedText === "rubrik" ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                          <span>{copiedText === "rubrik" ? "Kopierad!" : "Kopiera rubrik"}</span>
+                        </button>
+                      </div>
+                      <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-slate-800 font-medium">
+                        {listingData.blocket_title}
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center">
+                        <label className="font-semibold text-slate-600">Annonstext:</label>
+                        <button
+                          onClick={() => copyToClipboard(listingData.blocket_body, "text")}
+                          className="text-[11px] text-indigo-600 font-bold hover:underline flex items-center space-x-1"
+                        >
+                          {copiedText === "text" ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                          <span>{copiedText === "text" ? "Kopierad!" : "Kopiera text"}</span>
+                        </button>
+                      </div>
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-slate-700 whitespace-pre-line leading-relaxed max-h-60 overflow-y-auto font-sans">
+                        {listingData.blocket_body}
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() =>
+                        copyToClipboard(
+                          `${listingData.blocket_title}\n\nPris: ${listingData.suggested_price_sek} kr\n\n${listingData.blocket_body}`,
+                          "allt"
+                        )
+                      }
+                      className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs shadow transition flex items-center justify-center space-x-2"
+                    >
+                      {copiedText === "allt" ? (
+                        <>
+                          <Check className="w-4 h-4 text-emerald-300" />
+                          <span>Kopierat till urklipp!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-4 h-4" />
+                          <span>Kopiera hela annonsen</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3 text-xs">
+                    <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200/80 space-y-1">
+                      <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        <span>Föreslaget startbud</span>
+                        <span>Tradera Auktion</span>
+                      </div>
+                      <div className="text-2xl font-extrabold text-slate-900">
+                        {Number(listingData.tradera_start_bid_sek).toLocaleString("sv-SE")} kr
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center">
+                        <label className="font-semibold text-slate-600">Auktionsrubrik:</label>
+                        <button
+                          onClick={() => copyToClipboard(listingData.tradera_title, "tradera_rubrik")}
+                          className="text-[11px] text-indigo-600 font-bold hover:underline flex items-center space-x-1"
+                        >
+                          {copiedText === "tradera_rubrik" ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                          <span>{copiedText === "tradera_rubrik" ? "Kopierad!" : "Kopiera"}</span>
+                        </button>
+                      </div>
+                      <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-slate-800 font-medium">
+                        {listingData.tradera_title}
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center">
+                        <label className="font-semibold text-slate-600">Beskrivning:</label>
+                        <button
+                          onClick={() => copyToClipboard(listingData.tradera_body, "tradera_text")}
+                          className="text-[11px] text-indigo-600 font-bold hover:underline flex items-center space-x-1"
+                        >
+                          {copiedText === "tradera_text" ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                          <span>{copiedText === "tradera_text" ? "Kopierad!" : "Kopiera"}</span>
+                        </button>
+                      </div>
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-slate-700 whitespace-pre-line leading-relaxed max-h-60 overflow-y-auto font-sans">
+                        {listingData.tradera_body}
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() =>
+                        copyToClipboard(
+                          `${listingData.tradera_title}\n\nUtropspris: ${listingData.tradera_start_bid_sek} kr\n\n${listingData.tradera_body}`,
+                          "tradera_allt"
+                        )
+                      }
+                      className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs shadow transition flex items-center justify-center space-x-2"
+                    >
+                      {copiedText === "tradera_allt" ? (
+                        <>
+                          <Check className="w-4 h-4 text-emerald-300" />
+                          <span>Kopierat till urklipp!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-4 h-4" />
+                          <span>Kopiera Tradera-auktionen</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* KVITTO LIGHTBOX (Inbyggd helskärmsvisare) */}
+      {viewingReceiptUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-in fade-in"
+          onClick={() => setViewingReceiptUrl(null)}
+        >
+          <div
+            className="relative max-w-md w-full bg-slate-900 rounded-3xl overflow-hidden shadow-2xl p-2 flex flex-col items-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-full flex justify-between items-center px-3 py-2 text-white text-xs">
+              <span className="font-bold flex items-center space-x-1.5">
+                <Receipt className="w-4 h-4 text-indigo-400" />
+                <span>Originalkvitto</span>
+              </span>
+              <button
+                onClick={() => setViewingReceiptUrl(null)}
+                className="p-1 rounded-full bg-white/10 hover:bg-white/20 text-white transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="w-full max-h-[75vh] overflow-auto rounded-2xl bg-white flex items-center justify-center p-1">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={viewingReceiptUrl}
+                alt="Kvitto"
+                className="max-h-[70vh] w-auto object-contain rounded-xl"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BOSTADS-MODAL */}
       {showPropertyModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white rounded-3xl p-5 w-full max-w-sm shadow-2xl border border-slate-100 space-y-4">
@@ -1489,7 +2023,7 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Auth Modal */}
+      {/* AUTH MODAL */}
       {showAuthModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-slate-100 space-y-4">
