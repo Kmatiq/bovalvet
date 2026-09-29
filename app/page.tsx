@@ -20,6 +20,7 @@ import {
   FileDown, 
   Building2, 
   ChevronDown, 
+  ChevronUp,
   AlertTriangle, 
   Receipt, 
   CalendarCheck,
@@ -36,12 +37,20 @@ import {
   Image as ImageIcon,
   PenTool,
   Phone,
-  ExternalLink,
   ChevronRight,
   Plus,
   Home as HomeIcon,
   LayoutGrid,
-  MoreHorizontal
+  MoreHorizontal,
+  Clock,
+  Shield,
+  Users,
+  Wrench,
+  BookOpen,
+  ExternalLink,
+  Archive,
+  RotateCcw,
+  Scale
 } from "lucide-react";
 import { sanitizeAndCompressImage } from "@/lib/sanitizeImage";
 import { supabase } from "@/lib/supabaseClient";
@@ -123,12 +132,17 @@ interface VaultItem {
   purchase_store?: string;
   purchase_price_sek?: number;
   warranty_months?: number;
+  maintenance_done?: boolean;
+  maintenance_date?: string;
+  is_archived?: boolean;
+  archive_reason?: string;
   created_at: string;
 }
 
 function formatItemsCount(count: number) {
-  if (count === 1) return "1 sak";
-  return `${count} saker`;
+  if (count === 0) return "inga saker sparade än";
+  if (count === 1) return "1 sak säkrad";
+  return `${count} saker säkrade`;
 }
 
 function getWarrantyStatus(purchaseDateStr?: string, warrantyMonths: number = 36) {
@@ -147,34 +161,63 @@ function getWarrantyStatus(purchaseDateStr?: string, warrantyMonths: number = 36
   if (diffDays <= 0) {
     return {
       status: "expired",
+      diffDays,
       label: "Garantin har löpt ut",
       expiryDate: expiryDate.toLocaleDateString("sv-SE"),
       badgeClass: "bg-[var(--color-expired-bg)] text-[var(--color-expired-text)]",
     };
   }
 
-  if (diffMonths <= 2) {
+  if (diffDays <= 60) {
     return {
       status: "expiring_soon",
+      diffDays,
       label: `Löper ut om ${diffDays} dagar!`,
       expiryDate: expiryDate.toLocaleDateString("sv-SE"),
-      badgeClass: "bg-[var(--color-warn-bg)] text-[var(--color-warn-text)] border border-[var(--color-border)]",
+      badgeClass: "bg-[var(--color-warn-bg)] text-[var(--color-warn-text)] border border-[var(--color-border)] font-bold",
     };
   }
 
   return {
     status: "active",
-    label: `Aktiv garanti (${diffMonths} mån kvar)`,
+    diffDays,
+    label: `Aktiv (${diffMonths} mån kvar)`,
     expiryDate: expiryDate.toLocaleDateString("sv-SE"),
     badgeClass: "bg-[var(--color-success-bg)] text-[var(--color-success-text)]",
   };
+}
+
+function requiresManualOrCare(item: VaultItem): boolean {
+  const text = `${item.category || ""} ${item.title || ""} ${item.model || ""}`.toLowerCase();
+  
+  const ignoreList = [
+    "konst", "figurin", "staty", "skulptur", "prydnad", "tavla", "vas", 
+    "smycke", "klocka", "kläder", "möbel", "stol", "bord", "matta", "bok"
+  ];
+  if (ignoreList.some((word) => text.includes(word))) {
+    return false;
+  }
+
+  const applianceKeywords = [
+    "elektronik", "vitvaror", "maskin", "pump", "tvätt", "tork", "disk", 
+    "ugn", "spis", "kyl", "frys", "kaffe", "espresso", "robot", "klippare", 
+    "dammsugare", "verktyg", "såg", "borr", "tv", "ljud", "router", "skärm", "dusch"
+  ];
+
+  return applianceKeywords.some((word) => text.includes(word));
 }
 
 export default function HomePage() {
   const [currentNav, setCurrentNav] = useState<"home" | "rooms" | "insurance" | "more">("home");
   const [sessionUser, setSessionUser] = useState<any>(null);
 
-  // Bostäder
+  const [displayName, setDisplayName] = useState<string>("");
+  const [displayNameInput, setDisplayNameInput] = useState<string>("");
+  const [isUpdatingName, setIsUpdatingName] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+
+  const [openGuideCard, setOpenGuideCard] = useState<string | null>("warranty");
+
   const [properties, setProperties] = useState<Property[]>([]);
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
   const [showPropertyModal, setShowPropertyModal] = useState(false);
@@ -182,23 +225,23 @@ export default function HomePage() {
   const [propertyFormData, setPropertyFormData] = useState<Partial<Property>>({});
   const [isSavingProperty, setIsSavingProperty] = useState(false);
 
-  // Rumsläge
+  const [propertyMembers, setPropertyMembers] = useState<any[]>([]);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [isInviting, setIsInviting] = useState(false);
+
   const [activeRoom, setActiveRoom] = useState<string>("Vardagsrum");
   const [showRoomPickerScreen, setShowRoomPickerScreen] = useState(false);
 
-  // Bild & Analys
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [base64ForSave, setBase64ForSave] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [result, setResult] = useState<ItemAnalysisResult | null>(null);
 
-  // Valvstatus
   const [totalValuationSek, setTotalValuationSek] = useState<number>(0);
   const [vaultItems, setVaultItems] = useState<VaultItem[]>([]);
   const [selectedRoomFilter, setSelectedRoomFilter] = useState<string>("Alla");
 
-  // Detaljvy
   const [editingItem, setEditingItem] = useState<VaultItem | null>(null);
   const [activeImageIndex, setActiveImageIndex] = useState<number>(0);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -206,15 +249,15 @@ export default function HomePage() {
   const [isAnalyzingReceipt, setIsAnalyzingReceipt] = useState(false);
   const [viewingReceiptUrl, setViewingReceiptUrl] = useState<string | null>(null);
 
-  // Raderingsbekräftelse
   const [itemToDelete, setItemToDelete] = useState<VaultItem | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showArchiveHub, setShowArchiveHub] = useState(false);
+  const [itemToArchive, setItemToArchive] = useState<VaultItem | null>(null);
+  const [archiveReasonInput, setArchiveReasonInput] = useState<string>("Såld");
 
-  // Sheets
   const [showAddActionSheet, setShowAddActionSheet] = useState(false);
   const [showEditPhotoOptions, setShowEditPhotoOptions] = useState(false);
 
-  // Manuell registrering
   const [showManualModal, setShowManualModal] = useState(false);
   const [manualFormData, setManualFormData] = useState<Partial<VaultItem>>({
     room: "Vardagsrum",
@@ -225,22 +268,20 @@ export default function HomePage() {
   const [manualPhotoPreview, setManualPhotoPreview] = useState<string | null>(null);
   const [isSavingManual, setIsSavingManual] = useState(false);
 
-  // Blocket/Tradera
   const [listingModalItem, setListingModalItem] = useState<VaultItem | null>(null);
   const [listingData, setListingData] = useState<any>(null);
   const [isGeneratingListing, setIsGeneratingListing] = useState(false);
   const [activeListingTab, setActiveListingTab] = useState<"blocket" | "tradera">("blocket");
   const [copiedText, setCopiedText] = useState<string | null>(null);
 
-  // Incident Modal
   const [showIncidentModal, setShowIncidentModal] = useState(false);
   const [incidentType, setIncidentType] = useState("Vattenskada / Läckage");
   const [incidentDate, setIncidentDate] = useState(new Date().toISOString().split("T")[0]);
   const [policeReportNumber, setPoliceReportNumber] = useState("");
-  const [incidentDescription, setIncidentDescription] = useState("");
   const [selectedIncidentItemIds, setSelectedIncidentItemIds] = useState<string[]>([]);
 
-  // Auth Modal
+  const [warrantyFilter, setWarrantyFilter] = useState<"all" | "expiring_soon" | "active">("all");
+
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -248,10 +289,8 @@ export default function HomePage() {
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  // Toast
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Input refs
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const receiptInputRef = useRef<HTMLInputElement>(null);
@@ -269,7 +308,12 @@ export default function HomePage() {
       const { data } = await supabase.auth.getSession();
       const user = data.session?.user || null;
       setSessionUser(user);
-      if (user) fetchProperties(user.id);
+      if (user) {
+        const storedName = user.user_metadata?.display_name || user.user_metadata?.full_name || "";
+        setDisplayName(storedName);
+        setDisplayNameInput(storedName);
+        fetchProperties(user.id);
+      }
     };
     initSession();
 
@@ -277,8 +321,13 @@ export default function HomePage() {
       const user = session?.user || null;
       setSessionUser(user);
       if (user) {
+        const storedName = user.user_metadata?.display_name || user.user_metadata?.full_name || "";
+        setDisplayName(storedName);
+        setDisplayNameInput(storedName);
         fetchProperties(user.id);
       } else {
+        setDisplayName("");
+        setDisplayNameInput("");
         setTotalValuationSek(0);
         setVaultItems([]);
         setProperties([]);
@@ -289,6 +338,37 @@ export default function HomePage() {
 
     return () => authListener.subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (selectedProperty?.id) {
+      fetchPropertyMembers(selectedProperty.id);
+    }
+  }, [selectedProperty]);
+
+  const handleSaveDisplayName = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!sessionUser) return;
+    setIsUpdatingName(true);
+
+    try {
+      const cleanName = displayNameInput.trim();
+      const { data, error } = await supabase.auth.updateUser({
+        data: { display_name: cleanName, full_name: cleanName }
+      });
+
+      if (error) throw error;
+
+      if (data?.user) {
+        setSessionUser(data.user);
+        setDisplayName(cleanName);
+        showToast("Ditt namn har sparats ✓");
+      }
+    } catch (err: any) {
+      alert(`Kunde inte spara namn: ${err.message}`);
+    } finally {
+      setIsUpdatingName(false);
+    }
+  };
 
   const fetchProperties = async (userId: string) => {
     try {
@@ -331,9 +411,48 @@ export default function HomePage() {
     }
   };
 
+  const fetchPropertyMembers = async (propertyId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("property_members")
+        .select("*")
+        .eq("property_id", propertyId);
+
+      if (!error && data) {
+        setPropertyMembers(data);
+      }
+    } catch (e) {
+      console.error("Kunde inte hämta hushållsmedlemmar:", e);
+    }
+  };
+
+  const handleInviteMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProperty || !inviteEmail.trim()) return;
+
+    setIsInviting(true);
+    try {
+      const { error } = await supabase.from("property_members").insert({
+        property_id: selectedProperty.id,
+        user_email: inviteEmail.trim(),
+        role: "member"
+      });
+
+      if (error) throw error;
+
+      setInviteEmail("");
+      await fetchPropertyMembers(selectedProperty.id);
+      showToast("Inbjudan skickad ✓");
+    } catch (err: any) {
+      alert(`Kunde inte bjuda in: ${err.message}`);
+    } finally {
+      setIsInviting(false);
+    }
+  };
+
   const fetchVaultStats = async (userId: string, propertyId?: string) => {
     try {
-      let query = supabase.from("items").select("estimated_replacement_cost_sek").eq("user_id", userId);
+      let query = supabase.from("items").select("estimated_replacement_cost_sek").eq("user_id", userId).eq("is_archived", false);
       if (propertyId) query = query.eq("property_id", propertyId);
       const { data, error } = await query;
 
@@ -380,6 +499,7 @@ export default function HomePage() {
 
             return { 
               ...item, 
+              is_archived: Boolean(item.is_archived),
               image_paths: rawPaths,
               imageUrls: signedUrls,
               imageUrl: signedUrls[0] || "",
@@ -422,6 +542,45 @@ export default function HomePage() {
       alert(`Kunde inte radera: ${err.message}`);
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleArchiveItem = async () => {
+    if (!itemToArchive || !sessionUser) return;
+    try {
+      await supabase
+        .from("items")
+        .update({
+          is_archived: true,
+          archive_reason: archiveReasonInput,
+        })
+        .eq("id", itemToArchive.id);
+
+      const updated = { ...itemToArchive, is_archived: true, archive_reason: archiveReasonInput };
+      setVaultItems((prev) => prev.map((i) => (i.id === itemToArchive.id ? updated : i)));
+      if (editingItem?.id === itemToArchive.id) setEditingItem(null);
+      await fetchVaultStats(sessionUser.id, selectedProperty?.id);
+      setItemToArchive(null);
+      showToast(`Flyttad till arkivet (${archiveReasonInput}) ✓`);
+    } catch (err: any) {
+      alert(`Kunde inte arkivera: ${err.message}`);
+    }
+  };
+
+  const handleRestoreItem = async (item: VaultItem) => {
+    if (!sessionUser) return;
+    try {
+      await supabase
+        .from("items")
+        .update({ is_archived: false, archive_reason: null })
+        .eq("id", item.id);
+
+      const updated = { ...item, is_archived: false, archive_reason: undefined };
+      setVaultItems((prev) => prev.map((i) => (i.id === item.id ? updated : i)));
+      await fetchVaultStats(sessionUser.id, selectedProperty?.id);
+      showToast(`"${item.title}" har återställts till valvet ✓`);
+    } catch (err: any) {
+      alert(`Kunde inte återställa: ${err.message}`);
     }
   };
 
@@ -683,7 +842,7 @@ export default function HomePage() {
 
       await supabase.storage.from("item-photos").upload(fileName, blob, { contentType: "image/jpeg", upsert: true });
 
-      await supabase.from("items").insert({
+      const { data: insertedData, error: insertErr } = await supabase.from("items").insert({
         user_id: userId,
         property_id: selectedProperty?.id || null,
         title: result.title,
@@ -698,7 +857,10 @@ export default function HomePage() {
         image_path: fileName,
         photo_path: fileName,
         image_paths: [fileName],
-      });
+        is_archived: false
+      }).select().single();
+
+      if (insertErr) throw insertErr;
 
       await fetchVaultStats(userId, selectedProperty?.id);
       await fetchVaultItems(userId, selectedProperty?.id);
@@ -706,9 +868,20 @@ export default function HomePage() {
       setResult(null);
       setPreviewUrl(null);
       setBase64ForSave(null);
-      
-      setShowRoomPickerScreen(true);
-      showToast(`Sparad i ${activeRoom} ✓ Fota fler eller tryck Klar`);
+
+      if (insertedData) {
+        const { data: urlData } = await supabase.storage.from("item-photos").createSignedUrl(fileName, 3600);
+        const savedItemWithUrl: VaultItem = {
+          ...insertedData,
+          image_paths: [fileName],
+          imageUrls: [urlData?.signedUrl || ""],
+          imageUrl: urlData?.signedUrl || "",
+        };
+        setEditingItem(savedItemWithUrl);
+        setActiveImageIndex(0);
+      }
+
+      showToast(`Sparad i ${activeRoom} ✓`);
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : String(err));
     } finally {
@@ -742,7 +915,7 @@ export default function HomePage() {
       const repCost = Number(manualFormData.estimated_replacement_cost_sek) || 0;
       const mktVal = Number(manualFormData.market_value_sek) || Math.round(repCost * 0.5);
 
-      await supabase.from("items").insert({
+      const { data: insertedData, error: insertErr } = await supabase.from("items").insert({
         user_id: sessionUser.id,
         property_id: selectedProperty?.id || null,
         title: manualFormData.title,
@@ -758,7 +931,10 @@ export default function HomePage() {
         image_path: uploadedFileName,
         photo_path: uploadedFileName,
         image_paths: uploadedFileName ? [uploadedFileName] : [],
-      });
+        is_archived: false
+      }).select().single();
+
+      if (insertErr) throw insertErr;
 
       await fetchVaultStats(sessionUser.id, selectedProperty?.id);
       await fetchVaultItems(sessionUser.id, selectedProperty?.id);
@@ -767,7 +943,22 @@ export default function HomePage() {
       setManualFormData({ room: activeRoom, category: "Övrigt hem & inredning", condition: "Mycket gott" });
       setManualPhotoFile(null);
       setManualPhotoPreview(null);
-      showToast(`"${manualFormData.title}" sparades ✓`);
+
+      if (insertedData) {
+        let signed = "";
+        if (uploadedFileName) {
+          const { data: uData } = await supabase.storage.from("item-photos").createSignedUrl(uploadedFileName, 3600);
+          signed = uData?.signedUrl || "";
+        }
+        setEditingItem({
+          ...insertedData,
+          image_paths: uploadedFileName ? [uploadedFileName] : [],
+          imageUrls: signed ? [signed] : [],
+          imageUrl: signed
+        });
+      }
+
+      showToast("Prylen sparades ✓");
     } catch (err: any) {
       alert(`Kunde inte spara: ${err.message}`);
     } finally {
@@ -808,6 +999,9 @@ export default function HomePage() {
 
       if (activeUser) {
         setSessionUser(activeUser);
+        const storedName = activeUser.user_metadata?.display_name || activeUser.user_metadata?.full_name || "";
+        setDisplayName(storedName);
+        setDisplayNameInput(storedName);
         setShowAuthModal(false);
         await new Promise((r) => setTimeout(r, 300));
         await fetchProperties(activeUser.id);
@@ -823,17 +1017,43 @@ export default function HomePage() {
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     setSessionUser(null);
+    setShowProfileModal(false);
     setCurrentNav("home");
     showToast("Du har loggat ut");
   };
 
   const roomKeys = Object.keys(STANDARD_ROOMS);
-  const startedRoomCount = roomKeys.filter((r) => vaultItems.some((i) => i.room === r)).length;
-  const firstEmptyRoom = roomKeys.find((r) => !vaultItems.some((i) => i.room === r));
+  const activeVaultItems = vaultItems.filter((i) => !i.is_archived);
+  const archivedVaultItems = vaultItems.filter((i) => i.is_archived);
 
-  const filteredItemsByRoom = vaultItems.filter((i) => {
+  const startedRoomCount = roomKeys.filter((r) => activeVaultItems.some((i) => i.room === r)).length;
+  const firstEmptyRoom = roomKeys.find((r) => !activeVaultItems.some((i) => i.room === r));
+
+  const filteredItemsByRoom = activeVaultItems.filter((i) => {
     if (selectedRoomFilter === "Alla") return true;
     return (i.room || "Ospecificerat") === selectedRoomFilter;
+  });
+
+  const itemsWithWarranty = activeVaultItems.filter((i) => Boolean(i.purchase_date));
+  const expiringSoonItems = itemsWithWarranty.filter((i) => {
+    const s = getWarrantyStatus(i.purchase_date, i.warranty_months || 36);
+    return s?.status === "expiring_soon";
+  });
+  const activeWarrantyItems = itemsWithWarranty.filter((i) => {
+    const s = getWarrantyStatus(i.purchase_date, i.warranty_months || 36);
+    return s?.status === "active";
+  });
+
+  const displayedWarrantyItems = itemsWithWarranty.filter((i) => {
+    if (warrantyFilter === "expiring_soon") {
+      const s = getWarrantyStatus(i.purchase_date, i.warranty_months || 36);
+      return s?.status === "expiring_soon";
+    }
+    if (warrantyFilter === "active") {
+      const s = getWarrantyStatus(i.purchase_date, i.warranty_months || 36);
+      return s?.status === "active";
+    }
+    return true;
   });
 
   const openIncidentModal = () => {
@@ -848,13 +1068,13 @@ export default function HomePage() {
   };
 
   const toggleRoomItemsForIncident = (roomName: string) => {
-    const roomItemIds = vaultItems.filter((i) => (i.room || "Ospecificerat") === roomName).map((i) => i.id);
+    const roomItemIds = activeVaultItems.filter((i) => (i.room || "Ospecificerat") === roomName).map((i) => i.id);
     const allSelected = roomItemIds.length > 0 && roomItemIds.every((id) => selectedIncidentItemIds.includes(id));
     if (allSelected) setSelectedIncidentItemIds((prev) => prev.filter((id) => !roomItemIds.includes(id)));
     else setSelectedIncidentItemIds((prev) => Array.from(new Set([...prev, ...roomItemIds])));
   };
 
-  const selectedIncidentItems = vaultItems.filter((i) => selectedIncidentItemIds.includes(i.id));
+  const selectedIncidentItems = activeVaultItems.filter((i) => selectedIncidentItemIds.includes(i.id));
   const incidentTotalCost = selectedIncidentItems.reduce((sum, i) => sum + (Number(i.estimated_replacement_cost_sek) || 0), 0);
 
   const handleGenerateIncidentReport = () => {
@@ -866,20 +1086,21 @@ export default function HomePage() {
       incidentType,
       incidentDate,
       policeReportNumber: policeReportNumber.trim() || undefined,
-      description: incidentDescription.trim() || undefined,
       property: selectedProperty,
-      userEmail: sessionUser?.email || "Användare",
+      userEmail: displayName || sessionUser?.email || "Användare",
       items: selectedIncidentItems,
     });
     setShowIncidentModal(false);
   };
+
+  const avatarLetter = (displayName || sessionUser?.email || "K").trim()[0].toUpperCase();
 
   return (
     <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)] flex justify-center selection:bg-[var(--color-primary-soft)] selection:text-[var(--color-primary)]">
       <div className="w-full max-w-[480px] min-h-screen flex flex-col relative pb-32">
 
         {/* TOPPBAR (64 px) */}
-        {!showRoomPickerScreen && !isAnalyzing && !result && !editingItem && (
+        {!showRoomPickerScreen && !isAnalyzing && !result && !editingItem && !showArchiveHub && (
           <header className="h-16 px-5 flex items-center justify-between z-20">
             <div className="flex items-center gap-2.5">
               <div className="w-10 h-10 rounded-xl bg-[var(--color-primary)] text-[var(--color-onp,#fff)] flex items-center justify-center font-extrabold text-base shadow-xs">
@@ -898,11 +1119,14 @@ export default function HomePage() {
             </div>
 
             <button
-              onClick={() => setCurrentNav("more")}
-              className="w-11 h-11 rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)] flex items-center justify-center font-bold text-base border-0"
+              onClick={() => {
+                setDisplayNameInput(displayName);
+                setShowProfileModal(true);
+              }}
+              className="w-11 h-11 rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)] flex items-center justify-center font-bold text-base border-0 hover:opacity-90 active:scale-95 transition"
               aria-label="Profil och inställningar"
             >
-              {sessionUser?.email ? sessionUser.email[0].toUpperCase() : "K"}
+              {avatarLetter}
             </button>
           </header>
         )}
@@ -924,8 +1148,8 @@ export default function HomePage() {
         {/* HUVUDINNEHÅLL */}
         <main className="flex-1 px-5 pt-1 space-y-6 overflow-y-auto">
 
-          {/* RUMSLÄGET ("Var är du?") */}
-          {showRoomPickerScreen && !isAnalyzing && !result && !editingItem && (
+          {/* RUMSLÄGET */}
+          {showRoomPickerScreen && !isAnalyzing && !result && !editingItem && !showArchiveHub && (
             <div className="space-y-4 animate-in fade-in pt-2">
               <button 
                 onClick={() => setShowRoomPickerScreen(false)}
@@ -936,12 +1160,11 @@ export default function HomePage() {
 
               <div>
                 <h1 className="text-[24px] font-extrabold text-[var(--color-text)]">Var är du?</h1>
-                <p className="text-[14px] text-[var(--color-text-soft)] mt-1">
+                <p className="text-[16px] text-[var(--color-text-soft)] mt-1">
                   Vi sparar allt du fotar här tills du byter rum.
                 </p>
               </div>
 
-              {/* Rums-grid (Stora 64px knappar med emojis) */}
               <div className="grid grid-cols-2 gap-3 pt-2">
                 {roomKeys.map((rName) => {
                   const isSelected = activeRoom === rName;
@@ -975,7 +1198,7 @@ export default function HomePage() {
                 <button
                   type="button"
                   onClick={() => galleryInputRef.current?.click()}
-                  className="min-h-[44px] w-full text-[var(--color-text-soft)] text-sm font-semibold text-center hover:underline"
+                  className="min-h-[44px] w-full text-[var(--color-text-soft)] text-base font-semibold text-center hover:underline"
                 >
                   eller välj från mobilens album
                 </button>
@@ -996,7 +1219,7 @@ export default function HomePage() {
                 <div className="absolute inset-x-0 h-1 bg-[var(--color-primary)] animate-pulse top-1/2" />
               </div>
               <h2 className="text-xl font-bold text-[var(--color-text)]">Vi tittar på din pryl…</h2>
-              <p className="text-[14px] text-[var(--color-text-soft)]">
+              <p className="text-[16px] text-[var(--color-text-soft)]">
                 Känner igen märke, modell, skick och räknar ut nypris.
               </p>
             </div>
@@ -1021,9 +1244,9 @@ export default function HomePage() {
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={previewUrl} alt={result.title} className="w-full h-full object-cover" />
                 )}
-                <div className="absolute bottom-3 left-3 bg-white/95 backdrop-blur-md px-3 py-1.5 rounded-full shadow-xs border border-stone-200 flex items-center gap-1.5 text-slate-800">
+                <div className="absolute bottom-3 left-3 bg-white/95 backdrop-blur-md px-3.5 py-1.5 rounded-full shadow-xs border border-stone-200 flex items-center gap-1.5 text-slate-800">
                   <Check className="w-4 h-4 text-emerald-600" />
-                  <span className="text-[14px] font-semibold">{Math.round(result.confidence * 100)} % säker</span>
+                  <span className="text-[15px] font-semibold">{Math.round(result.confidence * 100)} % säker</span>
                 </div>
               </div>
 
@@ -1034,28 +1257,26 @@ export default function HomePage() {
                   onChange={(e) => setResult({ ...result, title: e.target.value })}
                   className="w-full min-h-[52px] px-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] font-bold text-xl text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
                 />
-                <p className="text-[14px] text-[var(--color-text-soft)] mt-1.5 font-medium">
+                <p className="text-[15px] text-[var(--color-text-soft)] mt-1.5 font-medium">
                   {result.brand} · {result.model}
                 </p>
               </div>
 
-              {/* Värderutor */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-[var(--color-surface)] p-3.5 rounded-2xl border border-[var(--color-border)] shadow-card">
-                  <span className="text-[14px] text-[var(--color-text-soft)] block font-medium">Nypris idag</span>
+                  <span className="text-[15px] text-[var(--color-text-soft)] block font-medium">Nypris idag</span>
                   <span className="text-[22px] font-black text-[var(--color-text)]">
                     {result.estimated_replacement_cost_sek.toLocaleString("sv-SE")} kr
                   </span>
                 </div>
                 <div className="bg-[var(--color-surface)] p-3.5 rounded-2xl border border-[var(--color-border)] shadow-card">
-                  <span className="text-[14px] text-[var(--color-text-soft)] block font-medium">Värde begagnat</span>
+                  <span className="text-[15px] text-[var(--color-text-soft)] block font-medium">Värde begagnat</span>
                   <span className="text-[22px] font-black text-[var(--color-primary)]">
                     {result.market_value_sek.toLocaleString("sv-SE")} kr
                   </span>
                 </div>
               </div>
 
-              {/* Rumsrad */}
               <button
                 type="button"
                 onClick={() => setShowRoomPickerScreen(true)}
@@ -1080,7 +1301,7 @@ export default function HomePage() {
                 <button
                   type="button"
                   onClick={() => cameraInputRef.current?.click()}
-                  className="min-h-[44px] w-full text-[var(--color-text-soft)] text-sm font-semibold"
+                  className="min-h-[44px] w-full text-[var(--color-text-soft)] text-base font-semibold"
                 >
                   Fota om
                 </button>
@@ -1089,69 +1310,89 @@ export default function HomePage() {
           )}
 
           {/* FLIK 1: HEM */}
-          {!showRoomPickerScreen && !isAnalyzing && !result && !editingItem && currentNav === "home" && (
+          {!showRoomPickerScreen && !isAnalyzing && !result && !editingItem && !showArchiveHub && currentNav === "home" && (
             <div className="space-y-6 animate-in fade-in">
               <div>
-                <h1 className="text-[24px] font-extrabold text-[var(--color-text)]">Hej!</h1>
+                <h1 className="text-[26px] font-extrabold text-[var(--color-text)]">
+                  Hej, {displayName || "där"}!
+                </h1>
                 <p className="text-[16px] text-[var(--color-text-soft)] mt-0.5">
-                  Du har säkrat {formatItemsCount(vaultItems.length)}[cite: 11]
+                  Du har {formatItemsCount(activeVaultItems.length)}
                 </p>
               </div>
 
-              {/* Värdekortet */}
               <div className="bg-gradient-to-br from-[var(--color-primary-soft)] to-[var(--color-surface)] rounded-3xl p-5 border border-[var(--color-border)] shadow-card space-y-3">
-                <span className="text-[14px] text-[var(--color-text-soft)] font-semibold block">
+                <span className="text-[15px] text-[var(--color-text-soft)] font-semibold block">
                   Värdet på dina saker
                 </span>
                 <div className="text-[40px] font-black tracking-tight text-[var(--color-text)] leading-none">
                   {totalValuationSek.toLocaleString("sv-SE")} kr
                 </div>
                 <p className="text-[16px] text-[var(--color-text)] leading-snug">
-                  {formatItemsCount(vaultItems.length)} säkrade med foto, kvitto och serienummer
+                  {formatItemsCount(activeVaultItems.length)} med foto, kvitto och serienummer
                 </p>
 
-                {/* Progress */}
                 <div className="pt-2 space-y-1.5">
-                  <div className="w-full bg-[var(--color-border)] rounded-full h-2 overflow-hidden">
+                  <div className="w-full bg-[var(--color-border)] rounded-full h-2.5 overflow-hidden">
                     <div 
                       className="h-full bg-[var(--color-primary)] rounded-full transition-all duration-500"
                       style={{ width: `${Math.round((startedRoomCount / 7) * 100)}%` }}
                     />
                   </div>
-                  <span className="text-[14px] text-[var(--color-text-soft)] font-medium block">
+                  <span className="text-[15px] text-[var(--color-text-soft)] font-medium block">
                     Hemmets inventering: {startedRoomCount} av 7 rum påbörjade
                   </span>
                 </div>
 
-                <div className="pt-3 border-t border-[var(--color-border)] flex items-center justify-between text-[14px] text-[var(--color-text-soft)]">
+                <div className="pt-3 border-t border-[var(--color-border)] flex items-center justify-between text-[15px] text-[var(--color-text-soft)]">
                   <span>Försäkring gäller upp till {Number(selectedProperty?.coverage_limit_sek || 1000000).toLocaleString("sv-SE")} kr</span>
                   <button onClick={() => setCurrentNav("insurance")} className="text-[var(--color-primary)] font-bold hover:underline">
-                    Se försäkring
+                    Se försäkring & garanti
                   </button>
                 </div>
               </div>
 
-              {/* NÄSTA STEG-KORT */}
+              {expiringSoonItems.length > 0 && (
+                <div 
+                  onClick={() => {
+                    setWarrantyFilter("expiring_soon");
+                    setCurrentNav("insurance");
+                  }}
+                  className="bg-[var(--color-warn-bg)] border border-[var(--color-border)] p-4 rounded-3xl cursor-pointer shadow-card flex items-center gap-3.5 active:scale-[.98] transition"
+                >
+                  <Clock className="w-6 h-6 text-[var(--color-warn-text)] flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <b className="text-[16px] text-[var(--color-warn-text)] block font-bold">
+                      {expiringSoonItems.length} {expiringSoonItems.length === 1 ? "garanti" : "garantier"} löper ut snart!
+                    </b>
+                    <span className="text-[14px] text-[var(--color-text-soft)] block truncate">
+                      T.ex. {expiringSoonItems[0].title}. Kontrollera skicket innan tidsfristen går ut.
+                    </span>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-[var(--color-warn-text)] opacity-60 flex-shrink-0" />
+                </div>
+              )}
+
               {firstEmptyRoom && (
-                <div className="bg-[var(--color-surface)] p-4 rounded-3xl border border-[var(--color-border)] shadow-card flex flex-col gap-3">
-                  <b className="text-[16px] text-[var(--color-text)]">
-                    {firstEmptyRoom} är tomt. Ta en runda?
-                  </b>
+                <div className="bg-[var(--color-surface)] p-4 rounded-2xl border border-[var(--color-border)] shadow-2xs flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <span className="text-[14px] text-[var(--color-text-soft)] block font-medium">Nästa steg</span>
+                    <b className="text-base text-[var(--color-text)] block truncate">{firstEmptyRoom} är tomt</b>
+                  </div>
                   <button
                     type="button"
                     onClick={() => {
                       setActiveRoom(firstEmptyRoom);
                       setShowRoomPickerScreen(true);
                     }}
-                    className="min-h-[52px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2 active:scale-[.98] transition"
+                    className="min-h-[44px] px-4 rounded-xl bg-[var(--color-primary-soft)] text-[var(--color-primary)] font-bold text-sm flex items-center gap-1.5 flex-shrink-0 hover:bg-[var(--color-primary)] hover:text-white transition"
                   >
-                    <Camera className="w-5 h-5" />
-                    <span>Fota i {firstEmptyRoom}</span>
+                    <Camera className="w-4 h-4" />
+                    <span>Fota här</span>
                   </button>
                 </div>
               )}
 
-              {/* RUM (Horisontell scroll) */}
               <div className="space-y-3">
                 <div className="flex justify-between items-center">
                   <h2 className="text-[20px] font-extrabold text-[var(--color-text)]">Rum</h2>
@@ -1163,12 +1404,12 @@ export default function HomePage() {
                 <div className="flex gap-3 overflow-x-auto -mx-5 px-5 pb-2 scrollbar-none">
                   {roomKeys
                     .sort((a, b) => {
-                      const countA = vaultItems.filter((i) => i.room === a).length;
-                      const countB = vaultItems.filter((i) => i.room === b).length;
+                      const countA = activeVaultItems.filter((i) => i.room === a).length;
+                      const countB = activeVaultItems.filter((i) => i.room === b).length;
                       return countB - countA;
                     })
                     .map((rName) => {
-                      const count = vaultItems.filter((i) => i.room === rName).length;
+                      const count = activeVaultItems.filter((i) => i.room === rName).length;
                       return (
                         <div
                           key={rName}
@@ -1191,14 +1432,13 @@ export default function HomePage() {
                 </div>
               </div>
 
-              {/* SENAST TILLAGDA SAKER */}
               <div className="space-y-3">
                 <h2 className="text-[20px] font-extrabold text-[var(--color-text)]">Senast tillagt</h2>
-                {vaultItems.length === 0 ? (
+                {activeVaultItems.length === 0 ? (
                   <div className="text-center py-10 bg-[var(--color-surface)] rounded-3xl border border-[var(--color-border)] p-6 space-y-3 shadow-card">
                     <span className="text-4xl">📷</span>
                     <h3 className="font-bold text-lg text-[var(--color-text)]">Börja med en pryl</h3>
-                    <p className="text-[14px] text-[var(--color-text-soft)]">
+                    <p className="text-[16px] text-[var(--color-text-soft)]">
                       Ta ett foto, så fyller vi i märke, modell och värde åt dig.
                     </p>
                     <button
@@ -1212,7 +1452,7 @@ export default function HomePage() {
                   </div>
                 ) : (
                   <div className="space-y-2.5">
-                    {vaultItems.slice(0, 5).map((item) => (
+                    {activeVaultItems.slice(0, 5).map((item) => (
                       <div
                         key={item.id}
                         onClick={() => {
@@ -1246,11 +1486,10 @@ export default function HomePage() {
           )}
 
           {/* FLIK 2: RUM */}
-          {!showRoomPickerScreen && !isAnalyzing && !result && !editingItem && currentNav === "rooms" && (
+          {!showRoomPickerScreen && !isAnalyzing && !result && !editingItem && !showArchiveHub && currentNav === "rooms" && (
             <div className="space-y-4 animate-in fade-in">
               <h1 className="text-[24px] font-extrabold text-[var(--color-text)] pt-1">Dina rum</h1>
 
-              {/* Filterchips */}
               <div className="flex gap-2 overflow-x-auto -mx-5 px-5 pb-1 scrollbar-none">
                 <button
                   type="button"
@@ -1261,10 +1500,10 @@ export default function HomePage() {
                       : "bg-[var(--color-surface)] text-[var(--color-text)] border-[var(--color-border)]"
                   }`}
                 >
-                  Alla ({vaultItems.length})
+                  Alla ({activeVaultItems.length})
                 </button>
                 {roomKeys.map((r) => {
-                  const count = vaultItems.filter((i) => i.room === r).length;
+                  const count = activeVaultItems.filter((i) => i.room === r).length;
                   return (
                     <button
                       key={r}
@@ -1282,13 +1521,12 @@ export default function HomePage() {
                 })}
               </div>
 
-              {/* Listan */}
               <div className="space-y-2.5 pt-1">
                 {filteredItemsByRoom.length === 0 ? (
                   <div className="text-center py-12 bg-[var(--color-surface)] rounded-3xl border border-[var(--color-border)] p-6 space-y-3">
                     <span className="text-5xl">{STANDARD_ROOMS[selectedRoomFilter] || "📷"}</span>
                     <h2 className="text-xl font-bold text-[var(--color-text)]">Här är det tomt</h2>
-                    <p className="text-[14px] text-[var(--color-text-soft)]">
+                    <p className="text-[16px] text-[var(--color-text-soft)]">
                       Ta ett foto, så fyller vi i märke, modell och värde åt dig.
                     </p>
                     <button
@@ -1331,7 +1569,7 @@ export default function HomePage() {
                               {Number(item.estimated_replacement_cost_sek).toLocaleString("sv-SE")} kr
                             </span>
                             {wStatus && (
-                              <span className={`text-[12px] font-bold px-2 py-0.5 rounded-md ${wStatus.badgeClass}`}>
+                              <span className={`text-[13px] font-bold px-2.5 py-0.5 rounded-md ${wStatus.badgeClass}`}>
                                 Garanti ✓
                               </span>
                             )}
@@ -1346,17 +1584,17 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* FLIK 3: FÖRSÄKRING */}
-          {!showRoomPickerScreen && !isAnalyzing && !result && !editingItem && currentNav === "insurance" && (
-            <div className="space-y-5 animate-in fade-in">
-              <h1 className="text-[24px] font-extrabold text-[var(--color-text)] pt-1">Försäkring</h1>
+          {/* FLIK 3: FÖRSÄKRING & GARANTI */}
+          {!showRoomPickerScreen && !isAnalyzing && !result && !editingItem && !showArchiveHub && currentNav === "insurance" && (
+            <div className="space-y-6 animate-in fade-in">
+              <h1 className="text-[24px] font-extrabold text-[var(--color-text)] pt-1">Försäkring & Garanti</h1>
 
               <div className="bg-[var(--color-surface)] rounded-3xl p-5 border border-[var(--color-border)] shadow-card space-y-2">
-                <span className="text-[14px] text-[var(--color-text-soft)] font-semibold block">Så här står du</span>
+                <span className="text-[15px] text-[var(--color-text-soft)] font-semibold block">Så här står du</span>
                 <div className="text-[20px] text-[var(--color-text)]">
                   <strong>{totalValuationSek.toLocaleString("sv-SE")} kr</strong> säkrat av <strong>{Number(selectedProperty?.coverage_limit_sek || 1000000).toLocaleString("sv-SE")} kr</strong>
                 </div>
-                <p className="text-[14px] text-[var(--color-text-soft)]">
+                <p className="text-[16px] text-[var(--color-text-soft)]">
                   Du kan fortsätta lägga till saker när som helst.
                 </p>
               </div>
@@ -1373,15 +1611,98 @@ export default function HomePage() {
 
                 <button
                   type="button"
-                  onClick={() => generateVaultPdf(vaultItems, sessionUser?.email || "Användare", totalValuationSek)}
+                  onClick={() => generateVaultPdf(activeVaultItems, displayName || sessionUser?.email || "Användare", totalValuationSek)}
                   className="min-h-[52px] w-full rounded-2xl bg-[var(--color-surface)] text-[var(--color-text)] border border-[var(--color-border)] font-bold text-base flex items-center justify-center gap-2 shadow-card"
                 >
                   <FileDown className="w-5 h-5" />
-                  <span>Ladda ner inventarielista</span>
+                  <span>Ladda ner inventarielista (PDF)</span>
                 </button>
               </div>
 
-              {/* Direktkontakt vid skada */}
+              <div className="space-y-3 pt-1">
+                <div className="flex justify-between items-center">
+                  <h2 className="text-[20px] font-extrabold text-[var(--color-text)] flex items-center gap-2">
+                    <Shield className="w-5 h-5 text-[var(--color-primary)]" />
+                    <span>Garantier & Kvitton</span>
+                  </h2>
+                </div>
+
+                <div className="flex gap-2 pb-1">
+                  <button
+                    type="button"
+                    onClick={() => setWarrantyFilter("all")}
+                    className={`min-h-[38px] px-3.5 rounded-full text-sm font-bold border transition ${
+                      warrantyFilter === "all" ? "bg-[var(--color-primary)] text-white border-[var(--color-primary)]" : "bg-[var(--color-surface)] text-[var(--color-text)] border-[var(--color-border)]"
+                    }`}
+                  >
+                    Alla ({itemsWithWarranty.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWarrantyFilter("expiring_soon")}
+                    className={`min-h-[38px] px-3.5 rounded-full text-sm font-bold border transition ${
+                      warrantyFilter === "expiring_soon" ? "bg-[var(--color-warn-bg)] text-[var(--color-warn-text)] border-[var(--color-border)] font-black" : "bg-[var(--color-surface)] text-[var(--color-text)] border-[var(--color-border)]"
+                    }`}
+                  >
+                    Löper ut snart ({expiringSoonItems.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWarrantyFilter("active")}
+                    className={`min-h-[38px] px-3.5 rounded-full text-sm font-bold border transition ${
+                      warrantyFilter === "active" ? "bg-[var(--color-primary)] text-white border-[var(--color-primary)]" : "bg-[var(--color-surface)] text-[var(--color-text)] border-[var(--color-border)]"
+                    }`}
+                  >
+                    Aktiva ({activeWarrantyItems.length})
+                  </button>
+                </div>
+
+                {displayedWarrantyItems.length === 0 ? (
+                  <div className="bg-[var(--color-surface)] p-4 rounded-2xl border border-[var(--color-border)] text-center text-base text-[var(--color-text-soft)]">
+                    Inga prylar med registrerat inköpsdatum matchar detta filter. Fota ett kvitto för att lägga till garanti.
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {displayedWarrantyItems.map((item) => {
+                      const s = getWarrantyStatus(item.purchase_date, item.warranty_months || 36);
+                      if (!s) return null;
+
+                      return (
+                        <div
+                          key={item.id}
+                          onClick={() => {
+                            setEditingItem({ ...item });
+                            setActiveImageIndex(0);
+                          }}
+                          className={`p-4 rounded-2xl border bg-[var(--color-surface)] shadow-card cursor-pointer active:scale-[.98] transition space-y-2 ${
+                            s.status === "expiring_soon" ? "border-amber-400 bg-amber-50/20" : "border-[var(--color-border)]"
+                          }`}
+                        >
+                          <div className="flex justify-between items-start gap-2">
+                            <div>
+                              <b className="text-base text-[var(--color-text)] block">{item.title}</b>
+                              <span className="text-[14px] text-[var(--color-text-soft)]">
+                                Inköpt: {item.purchase_date} {item.purchase_store ? `hos ${item.purchase_store}` : ""}
+                              </span>
+                            </div>
+                            <span className={`text-[13px] px-3 py-1 rounded-xl font-bold ${s.badgeClass}`}>
+                              {s.label}
+                            </span>
+                          </div>
+
+                          {s.status === "expiring_soon" && (
+                            <div className="pt-1.5 border-t border-[var(--color-border)] text-[13px] text-[var(--color-warn-text)] font-semibold flex items-center gap-1.5">
+                              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                              <span>Kontrollera funktionen innan garantin går ut den {s.expiryDate}!</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
               <div className="space-y-3 pt-2">
                 <h2 className="text-[20px] font-extrabold text-[var(--color-text)]">Direktkontakt vid skada</h2>
                 <div className="space-y-2">
@@ -1389,14 +1710,14 @@ export default function HomePage() {
                     <a
                       key={ins.name}
                       href={`tel:${ins.phone}`}
-                      className="min-h-[56px] p-3 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] flex items-center justify-between no-underline text-[var(--color-text)] shadow-2xs"
+                      className="min-h-[56px] p-3.5 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] flex items-center justify-between no-underline text-[var(--color-text)] shadow-2xs"
                     >
                       <div>
                         <b className="text-base block">{ins.name}</b>
-                        <span className="text-[14px] text-[var(--color-text-soft)]">{ins.phone}</span>
+                        <span className="text-[15px] text-[var(--color-text-soft)]">{ins.phone}</span>
                       </div>
-                      <span className="px-3 py-1.5 rounded-xl bg-[var(--color-success-bg)] text-[var(--color-success-text)] font-bold text-sm flex items-center gap-1.5">
-                        <Phone className="w-3.5 h-3.5" />
+                      <span className="px-3.5 py-1.5 rounded-xl bg-[var(--color-success-bg)] text-[var(--color-success-text)] font-bold text-sm flex items-center gap-1.5">
+                        <Phone className="w-4 h-4" />
                         <span>Ring</span>
                       </span>
                     </a>
@@ -1406,67 +1727,292 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* FLIK 4: MER */}
-          {!showRoomPickerScreen && !isAnalyzing && !result && !editingItem && currentNav === "more" && (
-            <div className="space-y-4 animate-in fade-in">
-              <h1 className="text-[24px] font-extrabold text-[var(--color-text)] pt-1">Mer</h1>
-
-              <div className="bg-[var(--color-surface)] rounded-3xl border border-[var(--color-border)] overflow-hidden shadow-card">
-                <button
-                  onClick={() => {
-                    setPropertyFormData(selectedProperty || {});
-                    setShowPropertyModal(true);
-                  }}
-                  className="min-h-[56px] w-full px-5 flex items-center justify-between border-b border-[var(--color-border)] text-base font-semibold text-[var(--color-text)] text-left"
-                >
-                  <span>Mina bostäder ({selectedProperty?.name})</span>
-                  <ChevronRight className="w-5 h-5 text-[var(--color-text-soft)]" />
-                </button>
-
-                <button
-                  onClick={() => showToast("Dina bilder används aldrig för att träna AI. Platsdata tas bort.")}
-                  className="min-h-[56px] w-full px-5 flex items-center justify-between border-b border-[var(--color-border)] text-base font-semibold text-[var(--color-text)] text-left"
-                >
-                  <span>Integritet och AI</span>
-                  <ChevronRight className="w-5 h-5 text-[var(--color-text-soft)]" />
-                </button>
-
-                <button
-                  onClick={() => showToast("Konsumentköplagen ger dig alltid 3 års lagstadgad reklamationsrätt.")}
-                  className="min-h-[56px] w-full px-5 flex items-center justify-between border-b border-[var(--color-border)] text-base font-semibold text-[var(--color-text)] text-left"
-                >
-                  <span>Konsumentköplagen (3 år)</span>
-                  <ChevronRight className="w-5 h-5 text-[var(--color-text-soft)]" />
-                </button>
-
-                {sessionUser && (
-                  <button
-                    onClick={handleSignOut}
-                    className="min-h-[56px] w-full px-5 flex items-center justify-between text-base font-bold text-rose-600 text-left"
-                  >
-                    <span>Logga ut ({sessionUser.email})</span>
-                    <LogOut className="w-5 h-5" />
-                  </button>
-                )}
+          {/* FLIK 4: MER (KUNSKAP & KONSUMENTGUIDE) */}
+          {!showRoomPickerScreen && !isAnalyzing && !result && !editingItem && !showArchiveHub && currentNav === "more" && (
+            <div className="space-y-5 animate-in fade-in">
+              <div>
+                <h1 className="text-[26px] font-extrabold text-[var(--color-text)] pt-1">Kunskap & Trygghet</h1>
+                <p className="text-[16px] text-[var(--color-text-soft)] mt-1">
+                  Guider om dina rättigheter, garantier och hur försäkringsbolag bedömer dina saker.
+                </p>
               </div>
 
-              <p className="text-[14px] text-[var(--color-text-soft)] px-2 leading-relaxed">
-                Dina bilder används aldrig för att träna AI. Platsdata tas bort på din telefon innan bilden sparas.
-              </p>
+              <div className="space-y-3">
+                <div className="bg-[var(--color-surface)] rounded-3xl border border-[var(--color-border)] overflow-hidden shadow-card">
+                  <button
+                    type="button"
+                    onClick={() => setOpenGuideCard(openGuideCard === "warranty" ? null : "warranty")}
+                    className="min-h-[64px] w-full px-5 flex items-center justify-between text-left"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-[var(--color-primary-soft)] text-[var(--color-primary)] flex items-center justify-center flex-shrink-0">
+                        <Scale className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <b className="text-[17px] text-[var(--color-text)] block">Garanti vs. Reklamationsrätt</b>
+                        <span className="text-[14px] text-[var(--color-text-soft)]">Vad är skillnaden och vad gäller?</span>
+                      </div>
+                    </div>
+                    {openGuideCard === "warranty" ? <ChevronUp className="w-5 h-5 text-[var(--color-text-soft)]" /> : <ChevronDown className="w-5 h-5 text-[var(--color-text-soft)]" />}
+                  </button>
+
+                  {openGuideCard === "warranty" && (
+                    <div className="px-5 pb-5 pt-1 space-y-3 border-t border-[var(--color-border)] text-[15px] text-[var(--color-text)] leading-relaxed">
+                      <p>
+                        <strong>Garanti är frivilligt:</strong> Det är ett löfte som butiken eller tillverkaren själv väljer att ge (ofta 1–2 år). Villkoren bestäms av tillverkaren.
+                      </p>
+                      <p>
+                        <strong>Reklamationsrätt är lag:</strong> I Sverige ger Konsumentköplagen dig alltid <strong>3 års rätt att reklamera</strong> ursprungliga fel på varor du köpt som privatperson.
+                      </p>
+                      <div className="p-3.5 rounded-2xl bg-[var(--color-bg)] border border-[var(--color-border)] space-y-1">
+                        <b className="text-sm block text-[var(--color-primary)]">Hur reklamerar du?</b>
+                        <span className="text-sm text-[var(--color-text-soft)] block">
+                          Öppna prylen i PrylKoll, visa ditt sparade originalkvitto och uppvisa för butiken. Du behöver inte originalkartong.
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-[var(--color-surface)] rounded-3xl border border-[var(--color-border)] overflow-hidden shadow-card">
+                  <button
+                    type="button"
+                    onClick={() => setOpenGuideCard(openGuideCard === "insurance" ? null : "insurance")}
+                    className="min-h-[64px] w-full px-5 flex items-center justify-between text-left"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-[var(--color-primary-soft)] text-[var(--color-primary)] flex items-center justify-center flex-shrink-0">
+                        <ShieldCheck className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <b className="text-[17px] text-[var(--color-text)] block">Åldersavdrag & Ersättning</b>
+                        <span className="text-[14px] text-[var(--color-text-soft)]">Så räknar försäkringsbolagen</span>
+                      </div>
+                    </div>
+                    {openGuideCard === "insurance" ? <ChevronUp className="w-5 h-5 text-[var(--color-text-soft)]" /> : <ChevronDown className="w-5 h-5 text-[var(--color-text-soft)]" />}
+                  </button>
+
+                  {openGuideCard === "insurance" && (
+                    <div className="px-5 pb-5 pt-1 space-y-3 border-t border-[var(--color-border)] text-[15px] text-[var(--color-text)] leading-relaxed">
+                      <p>
+                        <strong>Nyvärde vs. Marknadsvärde:</strong> De flesta hemförsäkringar ersätter nyvärde under de första 1–2 åren. Därefter görs ett årligt schablonavdrag (åldersavdrag).
+                      </p>
+                      <p>
+                        <strong>Elektronik tappar snabbast:</strong> TV-apparater och datorer skrivs av snabbare än massiva möbler, cyklar eller verktyg.
+                      </p>
+                      <div className="p-3.5 rounded-2xl bg-[var(--color-bg)] border border-[var(--color-border)]">
+                        <span className="text-sm text-[var(--color-text-soft)] block">
+                          <strong>Tips vid skada:</strong> PrylKolls PDF-skadeanmälan sammanställer både nypris, uppskattat begagnatvärde och kvitto så att du slipper bråka om värderingen.
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-[var(--color-surface)] rounded-3xl border border-[var(--color-border)] overflow-hidden shadow-card">
+                  <button
+                    type="button"
+                    onClick={() => setOpenGuideCard(openGuideCard === "privacy" ? null : "privacy")}
+                    className="min-h-[64px] w-full px-5 flex items-center justify-between text-left"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-[var(--color-primary-soft)] text-[var(--color-primary)] flex items-center justify-center flex-shrink-0">
+                        <Lock className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <b className="text-[17px] text-[var(--color-text)] block">Integritet & Säker AI</b>
+                        <span className="text-[14px] text-[var(--color-text-soft)]">Dina bilder och personuppgifter</span>
+                      </div>
+                    </div>
+                    {openGuideCard === "privacy" ? <ChevronUp className="w-5 h-5 text-[var(--color-text-soft)]" /> : <ChevronDown className="w-5 h-5 text-[var(--color-text-soft)]" />}
+                  </button>
+
+                  {openGuideCard === "privacy" && (
+                    <div className="px-5 pb-5 pt-1 space-y-3 border-t border-[var(--color-border)] text-[15px] text-[var(--color-text)] leading-relaxed">
+                      <p>
+                        <strong>Lokal EXIF-tvätt:</strong> Innan en bild laddas upp raderas all GPS- och kameradata direkt i din webbläsare. Ingen platsdata sparas någonsin i molnet.
+                      </p>
+                      <p>
+                        <strong>Ingen modellträning:</strong> Våra AI-anrop sker via kommersiella API:er med strikta databehandlingsavtal. Dina foton och kvitton används aldrig för att träna AI-modeller.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-[var(--color-surface)] rounded-3xl border border-[var(--color-border)] overflow-hidden shadow-card">
+                  <button
+                    type="button"
+                    onClick={() => setOpenGuideCard(openGuideCard === "coown" ? null : "coown")}
+                    className="min-h-[64px] w-full px-5 flex items-center justify-between text-left"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-[var(--color-primary-soft)] text-[var(--color-primary)] flex items-center justify-center flex-shrink-0">
+                        <Users className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <b className="text-[17px] text-[var(--color-text)] block">Hushåll & Samägande</b>
+                        <span className="text-[14px] text-[var(--color-text-soft)]">Bjud in sambo och dela valvet</span>
+                      </div>
+                    </div>
+                    {openGuideCard === "coown" ? <ChevronUp className="w-5 h-5 text-[var(--color-text-soft)]" /> : <ChevronDown className="w-5 h-5 text-[var(--color-text-soft)]" />}
+                  </button>
+
+                  {openGuideCard === "coown" && (
+                    <div className="px-5 pb-5 pt-1 space-y-4 border-t border-[var(--color-border)] text-[15px] text-[var(--color-text)] leading-relaxed">
+                      <p>
+                        I ett gemensamt hem är det smart att båda har tillgång till valvet. När din partner fotar en ny pryl dyker den upp i samma hem för er båda.
+                      </p>
+
+                      <div className="space-y-1.5 pt-1">
+                        <span className="text-xs font-semibold text-[var(--color-text-soft)] block">Personer med tillgång till {selectedProperty?.name}:</span>
+                        <div className="p-3 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border)] flex items-center justify-between text-sm">
+                          <span className="font-bold">{displayName || sessionUser?.email || "Du"} (Ägare)</span>
+                          <span className="text-xs px-2 py-0.5 rounded-md bg-[var(--color-primary-soft)] text-[var(--color-primary)] font-bold">Aktiv</span>
+                        </div>
+                        {propertyMembers.map((m) => (
+                          <div key={m.id} className="p-3 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border)] flex items-center justify-between text-sm">
+                            <span className="font-medium">{m.user_email}</span>
+                            <span className="text-xs px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 font-bold">Inbjuden</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      <form onSubmit={handleInviteMember} className="space-y-2 pt-1">
+                        <label className="text-xs font-semibold text-[var(--color-text-soft)] block">Bjud in partner med e-post</label>
+                        <div className="flex gap-2">
+                          <input
+                            type="email"
+                            required
+                            placeholder="partner@exempel.se"
+                            value={inviteEmail}
+                            onChange={(e) => setInviteEmail(e.target.value)}
+                            className="flex-1 min-h-[48px] px-3.5 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
+                          />
+                          <button
+                            type="submit"
+                            disabled={isInviting}
+                            className="min-h-[48px] px-5 rounded-xl bg-[var(--color-primary)] text-white font-bold text-sm flex items-center justify-center shadow-2xs"
+                          >
+                            {isInviting ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>Bjud in</span>}
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
-          {/* DETALJVY MED ALLA ÅTERSTÄLLDA FÄLT OCH FUNKTIONER */}
-          {editingItem && (
+          {/* DEDIKERAD ARKIV-SKÄRM */}
+          {showArchiveHub && (
             <div className="space-y-4 animate-in fade-in pt-1 pb-6">
               <button 
-                onClick={() => setEditingItem(null)} 
+                onClick={() => setShowArchiveHub(false)} 
                 className="min-h-[44px] flex items-center gap-1 text-[var(--color-primary)] font-bold text-base -ml-2"
               >
                 ← Tillbaka
               </button>
 
-              {/* Bildgalleri (max 3 bilder) */}
+              <div>
+                <h1 className="text-[24px] font-extrabold text-[var(--color-text)]">Arkiv & Sålda prylar</h1>
+                <p className="text-[15px] text-[var(--color-text-soft)] mt-1">
+                  Dessa saker räknas inte in i hemmets lösöresvärde, men kvitton och garantier är tryggt sparade.
+                </p>
+              </div>
+
+              <div className="space-y-2.5 pt-2">
+                {archivedVaultItems.length === 0 ? (
+                  <div className="text-center py-12 bg-[var(--color-surface)] rounded-3xl border border-[var(--color-border)] p-6 space-y-2">
+                    <span className="text-4xl">📦</span>
+                    <h3 className="font-bold text-lg text-[var(--color-text)]">Arkivet är tomt</h3>
+                    <p className="text-[15px] text-[var(--color-text-soft)]">
+                      När du säljer eller gör dig av med en pryl kan du arkivera den här istället för att radera kvittot.
+                    </p>
+                  </div>
+                ) : (
+                  archivedVaultItems.map((item) => (
+                    <div 
+                      key={item.id} 
+                      className="bg-[var(--color-surface)] p-4 rounded-2xl border border-[var(--color-border)] shadow-card space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-14 h-14 rounded-xl bg-[var(--color-bg)] overflow-hidden flex items-center justify-center text-xl flex-shrink-0 border border-[var(--color-border)]">
+                            {item.imageUrl ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={item.imageUrl} alt={item.title} className="w-full h-full object-cover" />
+                            ) : (
+                              <span>📦</span>
+                            )}
+                          </div>
+                          <div>
+                            <b className="text-base text-[var(--color-text)] block">{item.title}</b>
+                            <span className="text-sm text-[var(--color-text-soft)] block">
+                              Märkt som: <strong>{item.archive_reason || "Arkiverad"}</strong>
+                            </span>
+                          </div>
+                        </div>
+
+                        {item.receiptUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setViewingReceiptUrl(item.receiptUrl || null)}
+                            className="text-xs px-2.5 py-1.5 rounded-lg bg-[var(--color-primary-soft)] text-[var(--color-primary)] font-bold flex-shrink-0"
+                          >
+                            Visa kvitto
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="pt-2 border-t border-[var(--color-border)] flex items-center justify-between text-sm">
+                        <button
+                          type="button"
+                          onClick={() => handleRestoreItem(item)}
+                          className="text-[var(--color-primary)] font-bold flex items-center gap-1.5 hover:underline"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                          <span>Återställ till valvet</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setItemToDelete(item)}
+                          className="text-rose-600 font-bold hover:underline"
+                        >
+                          Radera permanent
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* DETALJVY (OMSTRUKTURERAD ORDNING UTAN AI-FLUFF) */}
+          {editingItem && !showArchiveHub && (
+            <div className="space-y-4 animate-in fade-in pt-1 pb-6">
+              <div className="flex items-center justify-between bg-[var(--color-primary-soft)] p-3 rounded-2xl border border-[var(--color-border)]">
+                <button 
+                  onClick={() => setEditingItem(null)} 
+                  className="text-[var(--color-primary)] font-bold text-sm flex items-center gap-1"
+                >
+                  ← Till rummet ({editingItem.room})
+                </button>
+                <button 
+                  onClick={() => {
+                    setEditingItem(null);
+                    cameraInputRef.current?.click();
+                  }}
+                  className="px-3.5 py-1.5 rounded-xl bg-[var(--color-primary)] text-white text-xs font-bold flex items-center gap-1 shadow-2xs"
+                >
+                  <Camera className="w-3.5 h-3.5" />
+                  <span>Fota en till i {editingItem.room}</span>
+                </button>
+              </div>
+
+              {/* 1. BILDGALLERI */}
               <div className="space-y-2">
                 {editingItem.imageUrls && editingItem.imageUrls.length > 0 ? (
                   <div className="relative h-64 rounded-3xl overflow-hidden bg-[var(--color-surface)] border border-[var(--color-border)] shadow-xs">
@@ -1487,11 +2033,10 @@ export default function HomePage() {
                   >
                     <span className="text-4xl">📷</span>
                     <b className="text-base mt-2">+ Lägg till första bilden</b>
-                    <span className="text-xs text-[var(--color-text-soft)]">Fota direkt eller välj från album</span>
+                    <span className="text-sm text-[var(--color-text-soft)]">Fota direkt eller välj från album</span>
                   </div>
                 )}
 
-                {/* Miniatyrer */}
                 <div className="flex items-center gap-2">
                   {(editingItem.imageUrls || []).map((url, idx) => (
                     <div 
@@ -1528,107 +2073,8 @@ export default function HomePage() {
                 </div>
               </div>
 
-              {/* KNAPP: SKAPA SÄLJANNONS */}
-              <button
-                type="button"
-                onClick={() => handleOpenListingModal(editingItem)}
-                className="min-h-[52px] w-full rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] font-bold text-base flex items-center justify-center gap-2 text-[var(--color-text)] shadow-card active:scale-[.98] transition"
-              >
-                <ShoppingBag className="w-5 h-5 text-[var(--color-primary)]" />
-                <span>Skapa säljannons (Blocket / Tradera)</span>
-              </button>
-
-              {/* SEKTION: KVITTO & GARANTIVAKT */}
-              <div className="bg-[var(--color-surface)] p-4 rounded-3xl border border-[var(--color-border)] shadow-card space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-base font-bold text-[var(--color-text)]">
-                    <Receipt className="w-5 h-5 text-[var(--color-primary)]" />
-                    <span>Kvitto & Garantivakt</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => receiptInputRef.current?.click()}
-                    disabled={isAnalyzingReceipt}
-                    className="min-h-[38px] px-3 rounded-xl bg-[var(--color-primary)] text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs hover:opacity-90"
-                  >
-                    {isAnalyzingReceipt ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
-                    <span>{editingItem.receipt_path ? "Byt kvitto" : "Fota kvitto"}</span>
-                  </button>
-                </div>
-
-                {editingItem.receiptUrl && (
-                  <div className="flex items-center justify-between p-3 rounded-2xl bg-[var(--color-primary-soft)] text-sm">
-                    <div className="flex items-center gap-2 truncate">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                      <span className="font-semibold truncate">Kvitto sparat i valvet</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setViewingReceiptUrl(editingItem.receiptUrl || null)}
-                      className="text-[var(--color-primary)] font-bold underline text-xs flex-shrink-0 ml-2"
-                    >
-                      Visa kvitto
-                    </button>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <label className="text-[12px] font-semibold text-[var(--color-text-soft)] block mb-1">Inköpsdatum</label>
-                    <input
-                      type="date"
-                      value={editingItem.purchase_date || ""}
-                      onChange={(e) => setEditingItem({ ...editingItem, purchase_date: e.target.value })}
-                      className="w-full min-h-[44px] px-3 text-sm border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[12px] font-semibold text-[var(--color-text-soft)] block mb-1">Inköpsbutik</label>
-                    <input
-                      type="text"
-                      placeholder="t.ex. Elgiganten"
-                      value={editingItem.purchase_store || ""}
-                      onChange={(e) => setEditingItem({ ...editingItem, purchase_store: e.target.value })}
-                      className="w-full min-h-[44px] px-3 text-sm border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <label className="text-[12px] font-semibold text-[var(--color-text-soft)] block mb-1">Köppris (SEK)</label>
-                    <input
-                      type="number"
-                      placeholder="Enligt kvitto"
-                      value={editingItem.purchase_price_sek || ""}
-                      onChange={(e) => setEditingItem({ ...editingItem, purchase_price_sek: Number(e.target.value) })}
-                      className="w-full min-h-[44px] px-3 text-sm border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] font-bold text-[var(--color-text)]"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[12px] font-semibold text-[var(--color-text-soft)] block mb-1">Garanti / Reklamation</label>
-                    <select
-                      value={editingItem.warranty_months || 36}
-                      onChange={(e) => setEditingItem({ ...editingItem, warranty_months: Number(e.target.value) })}
-                      className="w-full min-h-[44px] px-2 text-sm border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
-                    >
-                      <option value={12}>1 år (12 mån)</option>
-                      <option value={24}>2 år (24 mån)</option>
-                      <option value={36}>3 år (Konsumentköplagen)</option>
-                      <option value={60}>5 år (Förlängd)</option>
-                      <option value={120}>10 år (Trygghet)</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-1.5 text-[12px] text-[var(--color-text-soft)] pt-1">
-                  <CalendarCheck className="w-4 h-4 text-[var(--color-primary)] flex-shrink-0" />
-                  <span>Konsumentköplagen ger dig 3 års reklamationsrätt i Sverige.</span>
-                </div>
-              </div>
-
-              {/* FÖREMÅLSUPPGIFTER FORMULÄR */}
-              <form onSubmit={handleSaveItemUpdates} className="space-y-3.5 text-sm">
+              {/* 2. KÄRNUPPGIFTER (Benämning, Rum, Märke, Modell, Värden) */}
+              <form onSubmit={handleSaveItemUpdates} className="space-y-4 text-sm">
                 <div>
                   <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Benämning</label>
                   <input
@@ -1636,7 +2082,7 @@ export default function HomePage() {
                     required
                     value={editingItem.title}
                     onChange={(e) => setEditingItem({ ...editingItem, title: e.target.value })}
-                    className="w-full min-h-[50px] px-3.5 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)] font-semibold"
+                    className="w-full min-h-[52px] px-3.5 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)] font-semibold"
                   />
                 </div>
 
@@ -1645,7 +2091,7 @@ export default function HomePage() {
                   <select
                     value={editingItem.room || "Vardagsrum"}
                     onChange={(e) => setEditingItem({ ...editingItem, room: e.target.value })}
-                    className="w-full min-h-[50px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)] font-medium"
+                    className="w-full min-h-[52px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)] font-medium"
                   >
                     {roomKeys.map((r) => (
                       <option key={r} value={r}>{r}</option>
@@ -1660,7 +2106,7 @@ export default function HomePage() {
                       type="text"
                       value={editingItem.brand || ""}
                       onChange={(e) => setEditingItem({ ...editingItem, brand: e.target.value })}
-                      className="w-full min-h-[46px] px-3 text-sm border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
+                      className="w-full min-h-[48px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
                     />
                   </div>
                   <div>
@@ -1669,7 +2115,7 @@ export default function HomePage() {
                       type="text"
                       value={editingItem.model || ""}
                       onChange={(e) => setEditingItem({ ...editingItem, model: e.target.value })}
-                      className="w-full min-h-[46px] px-3 text-sm border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
+                      className="w-full min-h-[48px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
                     />
                   </div>
                 </div>
@@ -1681,7 +2127,7 @@ export default function HomePage() {
                       type="number"
                       value={editingItem.estimated_replacement_cost_sek}
                       onChange={(e) => setEditingItem({ ...editingItem, estimated_replacement_cost_sek: Number(e.target.value) })}
-                      className="w-full min-h-[46px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] font-extrabold text-[var(--color-text)]"
+                      className="w-full min-h-[48px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] font-extrabold text-[var(--color-text)]"
                     />
                   </div>
                   <div>
@@ -1690,28 +2136,144 @@ export default function HomePage() {
                       type="number"
                       value={editingItem.market_value_sek}
                       onChange={(e) => setEditingItem({ ...editingItem, market_value_sek: Number(e.target.value) })}
-                      className="w-full min-h-[46px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] font-extrabold text-[var(--color-primary)]"
+                      className="w-full min-h-[48px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] font-extrabold text-[var(--color-primary)]"
                     />
                   </div>
                 </div>
 
-                {/* AI TYPSKYLT & SERIENUMMER */}
-                <div className="bg-[var(--color-primary-soft)] p-3.5 rounded-2xl border border-[var(--color-border)] space-y-2">
-                  <div className="flex items-start gap-1.5 text-xs text-[var(--color-text)]">
-                    <Info className="w-4 h-4 text-[var(--color-primary)] flex-shrink-0 mt-0.5" />
-                    <span><strong>AI-tips typskylt:</strong> {editingItem.serial_number_hint || "Titta på baksidan eller undersidan."}</span>
+                {/* 3. KVITTO & GARANTIVAKT */}
+                <div className="bg-[var(--color-surface)] p-4 rounded-3xl border border-[var(--color-border)] shadow-card space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-base font-bold text-[var(--color-text)]">
+                      <Receipt className="w-5 h-5 text-[var(--color-primary)]" />
+                      <span>Kvitto & Garantivakt</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => receiptInputRef.current?.click()}
+                      disabled={isAnalyzingReceipt}
+                      className="min-h-[38px] px-3.5 rounded-xl bg-[var(--color-primary)] text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs hover:opacity-90"
+                    >
+                      {isAnalyzingReceipt ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
+                      <span>{editingItem.receipt_path ? "Byt kvitto" : "Fota kvitto"}</span>
+                    </button>
                   </div>
-                  <div>
-                    <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Faktiskt serienummer / PNC</label>
-                    <input
-                      type="text"
-                      placeholder="t.ex. 916 098 765"
-                      value={editingItem.serial_number || ""}
-                      onChange={(e) => setEditingItem({ ...editingItem, serial_number: e.target.value })}
-                      className="w-full min-h-[46px] px-3 text-sm font-mono border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
-                    />
+
+                  {editingItem.receiptUrl && (
+                    <div className="flex items-center justify-between p-3 rounded-2xl bg-[var(--color-primary-soft)] text-sm">
+                      <div className="flex items-center gap-2 truncate">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                        <span className="font-semibold truncate">Kvitto sparat i valvet</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setViewingReceiptUrl(editingItem.receiptUrl || null)}
+                        className="text-[var(--color-primary)] font-bold underline text-sm flex-shrink-0 ml-2"
+                      >
+                        Visa kvitto
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <label className="text-[13px] font-semibold text-[var(--color-text-soft)] block mb-1">Inköpsdatum</label>
+                      <input
+                        type="date"
+                        value={editingItem.purchase_date || ""}
+                        onChange={(e) => setEditingItem({ ...editingItem, purchase_date: e.target.value })}
+                        className="w-full min-h-[48px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[13px] font-semibold text-[var(--color-text-soft)] block mb-1">Inköpsbutik</label>
+                      <input
+                        type="text"
+                        placeholder="t.ex. Elgiganten"
+                        value={editingItem.purchase_store || ""}
+                        onChange={(e) => setEditingItem({ ...editingItem, purchase_store: e.target.value })}
+                        className="w-full min-h-[48px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <label className="text-[13px] font-semibold text-[var(--color-text-soft)] block mb-1">Köppris (SEK)</label>
+                      <input
+                        type="number"
+                        placeholder="Enligt kvitto"
+                        value={editingItem.purchase_price_sek || ""}
+                        onChange={(e) => setEditingItem({ ...editingItem, purchase_price_sek: Number(e.target.value) })}
+                        className="w-full min-h-[48px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] font-bold text-[var(--color-text)]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[13px] font-semibold text-[var(--color-text-soft)] block mb-1">Garanti / Reklamation</label>
+                      <select
+                        value={editingItem.warranty_months || 36}
+                        onChange={(e) => setEditingItem({ ...editingItem, warranty_months: Number(e.target.value) })}
+                        className="w-full min-h-[48px] px-2 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
+                      >
+                        <option value={12}>1 år (12 mån)</option>
+                        <option value={24}>2 år (24 mån)</option>
+                        <option value={36}>3 år (Garanti / Reklamationsrätt)</option>
+                        <option value={60}>5 år (Förlängd)</option>
+                        <option value={120}>10 år (Trygghet)</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
+
+                {/* 4. SERIENUMMER (UTAN AI-TIPS-PRATA) */}
+                <div>
+                  <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Serienummer / PNC</label>
+                  <input
+                    type="text"
+                    placeholder="t.ex. 916 098 765"
+                    value={editingItem.serial_number || ""}
+                    onChange={(e) => setEditingItem({ ...editingItem, serial_number: e.target.value })}
+                    className="w-full min-h-[48px] px-3 text-base font-mono border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
+                  />
+                </div>
+
+                {/* 5. SKÖTSEL & MANUAL (OM TILLÄMPLIGT) */}
+                {requiresManualOrCare(editingItem) && (
+                  <div className="bg-[var(--color-surface)] p-4 rounded-3xl border border-[var(--color-border)] shadow-card space-y-3">
+                    <div className="flex items-center gap-2 text-base font-bold text-[var(--color-text)]">
+                      <Wrench className="w-5 h-5 text-[var(--color-primary)]" />
+                      <span>Skötsel & Manual</span>
+                    </div>
+                    <p className="text-[14px] text-[var(--color-text-soft)] leading-relaxed">
+                      Underhållstips och bruksanvisning för din <strong>{editingItem.title}</strong> ({editingItem.brand || "Märke saknas"}).
+                    </p>
+
+                    <div className="space-y-2 pt-1">
+                      <a
+                        href={`https://www.google.com/search?q=manual+pdf+bruksanvisning+${encodeURIComponent(editingItem.brand || "")}+${encodeURIComponent(editingItem.model || editingItem.title)}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="min-h-[46px] px-4 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border)] font-bold text-sm flex items-center justify-between text-[var(--color-text)] hover:bg-[var(--color-primary-soft)] transition"
+                      >
+                        <span className="flex items-center gap-2">
+                          <BookOpen className="w-4 h-4 text-[var(--color-primary)]" />
+                          <span>Hitta officiell bruksanvisning (PDF)</span>
+                        </span>
+                        <ExternalLink className="w-4 h-4 opacity-60" />
+                      </a>
+                    </div>
+                  </div>
+                )}
+
+                {/* 6. SÄLJANNONS */}
+                <button
+                  type="button"
+                  onClick={() => handleOpenListingModal(editingItem)}
+                  className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary-soft)] border border-[var(--color-primary)] font-bold text-base flex items-center justify-center gap-2.5 text-[var(--color-primary)] shadow-card active:scale-[.98] transition"
+                >
+                  <ShoppingBag className="w-5 h-5" />
+                  <span>Skapa säljannons (Blocket / Tradera)</span>
+                </button>
 
                 <div>
                   <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Egna anteckningar</label>
@@ -1720,7 +2282,7 @@ export default function HomePage() {
                     placeholder="t.ex. Kvitto sparat, garanti, tillbehör..."
                     value={editingItem.notes || ""}
                     onChange={(e) => setEditingItem({ ...editingItem, notes: e.target.value })}
-                    className="w-full p-3 text-sm border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
+                    className="w-full p-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
                   />
                 </div>
 
@@ -1735,10 +2297,19 @@ export default function HomePage() {
 
                   <button
                     type="button"
-                    onClick={() => setItemToDelete(editingItem)}
-                    className="min-h-[44px] w-full text-[var(--color-text-soft)] text-sm font-semibold hover:text-rose-600 transition"
+                    onClick={() => setItemToArchive(editingItem)}
+                    className="min-h-[48px] w-full rounded-2xl bg-[var(--color-bg)] border border-[var(--color-border)] font-bold text-base flex items-center justify-center gap-2 text-[var(--color-text)] hover:bg-[var(--color-primary-soft)] transition"
                   >
-                    Ta bort pryl
+                    <Archive className="w-4 h-4 text-[var(--color-primary)]" />
+                    <span>Arkivera / Markera som såld</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setItemToDelete(editingItem)}
+                    className="min-h-[44px] w-full text-[var(--color-text-soft)] text-base font-semibold hover:text-rose-600 transition"
+                  >
+                    Radera permanent
                   </button>
                 </div>
               </form>
@@ -1746,8 +2317,8 @@ export default function HomePage() {
           )}
         </main>
 
-        {/* BOTTENMENY (Höjd 70 px – FAB-knappen upplyft och centrerad) */}
-        {!showRoomPickerScreen && !isAnalyzing && !result && !editingItem && (
+        {/* BOTTENMENY */}
+        {!showRoomPickerScreen && !isAnalyzing && !result && !editingItem && !showArchiveHub && (
           <nav className="fixed bottom-0 left-0 right-0 z-40 bg-[var(--color-surface)] border-t border-[var(--color-border)] h-[70px] flex items-center justify-around px-2 shadow-sm">
             <div className="w-full max-w-[480px] mx-auto flex items-center justify-around">
               <button
@@ -1772,7 +2343,6 @@ export default function HomePage() {
                 <span className="text-[13px]">Rum</span>
               </button>
 
-              {/* UPP-HÖJD KORALL KAMERA-FAB */}
               <div className="w-[76px] relative flex justify-center">
                 <button
                   type="button"
@@ -1792,7 +2362,7 @@ export default function HomePage() {
                 }`}
               >
                 <ShieldCheck className="w-6 h-6" />
-                <span className="text-[13px]">Försäkring</span>
+                <span className="text-[11px] font-medium leading-tight text-center">Försäkring & garanti</span>
               </button>
 
               <button
@@ -1809,7 +2379,245 @@ export default function HomePage() {
           </nav>
         )}
 
-        {/* ACTION SHEET FÖR ATT LÄGGA TILL PRYL */}
+        {/* PROFIL- & VALVHANTERINGSMODAL */}
+        {showProfileModal && (
+          <div 
+            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in"
+            onClick={() => setShowProfileModal(false)}
+          >
+            <div 
+              className="bg-[var(--color-surface)] rounded-t-[32px] sm:rounded-3xl p-6 w-full max-w-[480px] border border-[var(--color-border)] space-y-5 max-h-[90vh] overflow-y-auto shadow-2xl animate-in slide-in-from-bottom"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between pb-2 border-b border-[var(--color-border)]">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)] font-extrabold flex items-center justify-center text-lg">
+                    {avatarLetter}
+                  </div>
+                  <div>
+                    <h2 className="text-[18px] font-extrabold text-[var(--color-text)]">
+                      {displayName || "Min Profil"}
+                    </h2>
+                    <span className="text-xs text-[var(--color-text-soft)] block">
+                      {sessionUser?.email || "Inloggad"}
+                    </span>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowProfileModal(false)}
+                  className="p-2 rounded-full hover:bg-[var(--color-border)] text-[var(--color-text-soft)]"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveDisplayName} className="space-y-2 p-4 rounded-2xl bg-[var(--color-bg)] border border-[var(--color-border)]">
+                <label className="text-xs font-semibold text-[var(--color-text-soft)] block">Ditt namn i appen</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    required
+                    placeholder="Förnamn och efternamn"
+                    value={displayNameInput}
+                    onChange={(e) => setDisplayNameInput(e.target.value)}
+                    className="flex-1 min-h-[46px] px-3.5 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)] font-semibold"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isUpdatingName}
+                    className="min-h-[46px] px-4 rounded-xl bg-[var(--color-primary)] text-white font-bold text-sm flex items-center justify-center shadow-2xs"
+                  >
+                    {isUpdatingName ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>Spara</span>}
+                  </button>
+                </div>
+                <span className="text-xs text-[var(--color-text-soft)] block">Detta namn visas i hälsningen på startsidan och i rapporter.</span>
+              </form>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowProfileModal(false);
+                  setPropertyFormData(selectedProperty || {});
+                  setShowPropertyModal(true);
+                }}
+                className="min-h-[56px] w-full px-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] font-bold text-base flex items-center justify-between text-[var(--color-text)] hover:bg-[var(--color-primary-soft)] transition"
+              >
+                <span className="flex items-center gap-3">
+                  <Building2 className="w-5 h-5 text-[var(--color-primary)]" />
+                  <span>Mina bostäder ({selectedProperty?.name})</span>
+                </span>
+                <ChevronRight className="w-5 h-5 text-[var(--color-text-soft)]" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowProfileModal(false);
+                  setShowArchiveHub(true);
+                }}
+                className="min-h-[56px] w-full px-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] font-bold text-base flex items-center justify-between text-[var(--color-text)] hover:bg-[var(--color-primary-soft)] transition"
+              >
+                <span className="flex items-center gap-3">
+                  <Archive className="w-5 h-5 text-[var(--color-primary)]" />
+                  <span>Arkiv & sålda prylar ({archivedVaultItems.length})</span>
+                </span>
+                <ChevronRight className="w-5 h-5 text-[var(--color-text-soft)]" />
+              </button>
+
+              {sessionUser && (
+                <div className="pt-2 border-t border-[var(--color-border)]">
+                  <button
+                    type="button"
+                    onClick={handleSignOut}
+                    className="min-h-[52px] w-full rounded-2xl bg-rose-50 text-rose-700 font-bold text-base flex items-center justify-center gap-2 border border-rose-200 hover:bg-rose-100 transition"
+                  >
+                    <LogOut className="w-5 h-5" />
+                    <span>Logga ut</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ARKIVERINGS-SHEET */}
+        {itemToArchive && (
+          <div 
+            className="fixed inset-0 z-60 bg-black/45 flex items-end animate-in fade-in"
+            onClick={() => setItemToArchive(null)}
+          >
+            <div 
+              className="w-full max-w-[480px] mx-auto bg-[var(--color-surface)] rounded-t-[28px] p-5 pb-8 space-y-4 animate-in slide-in-from-bottom"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="w-11 h-1.5 bg-[var(--color-border)] rounded-full mx-auto mb-2" />
+              <h2 className="text-[20px] font-extrabold text-[var(--color-text)]">
+                Arkivera {itemToArchive.title}
+              </h2>
+              <p className="text-[15px] text-[var(--color-text-soft)]">
+                Prylen tas bort från ditt aktiva hemvärde, men du behåller kvitton och garanti tryggt i arkivet.
+              </p>
+
+              <div>
+                <label className="text-xs font-semibold text-[var(--color-text-soft)] block mb-1">Vad hände med prylen?</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {["Såld", "Bortskänkt", "Kasserad"].map((reason) => (
+                    <button
+                      key={reason}
+                      type="button"
+                      onClick={() => setArchiveReasonInput(reason)}
+                      className={`min-h-[44px] rounded-xl font-bold text-sm border transition ${
+                        archiveReasonInput === reason 
+                          ? "bg-[var(--color-primary)] text-white border-[var(--color-primary)]" 
+                          : "bg-[var(--color-bg)] border-[var(--color-border)] text-[var(--color-text)]"
+                      }`}
+                    >
+                      {reason}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-2 pt-2">
+                <button
+                  type="button"
+                  onClick={handleArchiveItem}
+                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2"
+                >
+                  <span>Spara till Arkivet</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setItemToArchive(null)}
+                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] font-bold text-base"
+                >
+                  Avbryt
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* RADERINGS-BEKRÄFTELSE */}
+        {itemToDelete && (
+          <div 
+            className="fixed inset-0 z-60 bg-black/45 flex items-end animate-in fade-in"
+            onClick={() => setItemToDelete(null)}
+          >
+            <div 
+              className="w-full max-w-[480px] mx-auto bg-[var(--color-surface)] rounded-t-[28px] p-5 pb-8 space-y-3 animate-in slide-in-from-bottom"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="w-11 h-1.5 bg-[var(--color-border)] rounded-full mx-auto mb-2" />
+              <h2 className="text-[20px] font-extrabold text-[var(--color-text)]">
+                Radera {itemToDelete.title} permanent?
+              </h2>
+              <p className="text-[16px] text-[var(--color-text-soft)]">
+                Det går inte att ångra. Både föremålet och alla sparade kvitton raderas helt från valvet.
+              </p>
+
+              <div className="space-y-2 pt-2">
+                <button
+                  type="button"
+                  onClick={handleConfirmDelete}
+                  disabled={isDeleting}
+                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-danger)] text-white font-bold text-base flex items-center justify-center gap-2"
+                >
+                  {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>Radera permanent</span>}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setItemToDelete(null)}
+                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] font-bold text-base"
+                >
+                  Behåll
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ACTION SHEET FÖR FOTO */}
+        {showEditPhotoOptions && (
+          <div 
+            className="fixed inset-0 z-60 bg-black/45 flex items-end"
+            onClick={() => setShowEditPhotoOptions(false)}
+          >
+            <div 
+              className="w-full max-w-[480px] mx-auto bg-[var(--color-surface)] rounded-t-[28px] p-5 pb-8 space-y-2.5 animate-in slide-in-from-bottom"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="w-11 h-1.5 bg-[var(--color-border)] rounded-full mx-auto mb-2" />
+              <h2 className="text-[20px] font-extrabold text-[var(--color-text)]">Lägg till foto</h2>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEditPhotoOptions(false);
+                  editItemCameraInputRef.current?.click();
+                }}
+                className="w-full min-h-[56px] rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2"
+              >
+                <Camera className="w-5 h-5" />
+                <span>Ta foto med kameran</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEditPhotoOptions(false);
+                  editItemGalleryInputRef.current?.click();
+                }}
+                className="w-full min-h-[56px] rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] font-bold text-base flex items-center justify-center gap-2"
+              >
+                <ImageIcon className="w-5 h-5" />
+                <span>Välj från mobilens album</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ACTION SHEET FÖR LÄGG TILL */}
         {showAddActionSheet && (
           <div 
             className="fixed inset-0 z-50 bg-black/45 flex items-end animate-in fade-in"
@@ -1868,89 +2676,6 @@ export default function HomePage() {
                   </div>
                 </button>
               </div>
-
-              <p className="text-[14px] text-[var(--color-text-soft)] text-center pt-2">
-                Bilderna används inte för att träna AI.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* RADERINGS-BEKRÄFTELSE (Bottom Sheet) */}
-        {itemToDelete && (
-          <div 
-            className="fixed inset-0 z-60 bg-black/45 flex items-end animate-in fade-in"
-            onClick={() => setItemToDelete(null)}
-          >
-            <div 
-              className="w-full max-w-[480px] mx-auto bg-[var(--color-surface)] rounded-t-[28px] p-5 pb-8 space-y-3 animate-in slide-in-from-bottom"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="w-11 h-1.5 bg-[var(--color-border)] rounded-full mx-auto mb-2" />
-              <h2 className="text-[20px] font-extrabold text-[var(--color-text)]">
-                Ta bort {itemToDelete.title}?
-              </h2>
-              <p className="text-[14px] text-[var(--color-text-soft)]">
-                Det går inte att ångra. Föremålet raderas permanent från valvet.
-              </p>
-
-              <div className="space-y-2 pt-2">
-                <button
-                  type="button"
-                  onClick={handleConfirmDelete}
-                  disabled={isDeleting}
-                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-danger)] text-white font-bold text-base flex items-center justify-center gap-2"
-                >
-                  {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>Ta bort</span>}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setItemToDelete(null)}
-                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] font-bold text-base"
-                >
-                  Behåll
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ACTION SHEET FÖR KAMERA VS ALBUM VID BEFINTLIGT FÖREMÅL */}
-        {showEditPhotoOptions && (
-          <div 
-            className="fixed inset-0 z-60 bg-black/45 flex items-end"
-            onClick={() => setShowEditPhotoOptions(false)}
-          >
-            <div 
-              className="w-full max-w-[480px] mx-auto bg-[var(--color-surface)] rounded-t-[28px] p-5 pb-8 space-y-2.5 animate-in slide-in-from-bottom"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="w-11 h-1.5 bg-[var(--color-border)] rounded-full mx-auto mb-2" />
-              <h2 className="text-[20px] font-extrabold text-[var(--color-text)]">Lägg till foto</h2>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setShowEditPhotoOptions(false);
-                  editItemCameraInputRef.current?.click();
-                }}
-                className="w-full min-h-[56px] rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2"
-              >
-                <Camera className="w-5 h-5" />
-                <span>Ta foto med kameran</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setShowEditPhotoOptions(false);
-                  editItemGalleryInputRef.current?.click();
-                }}
-                className="w-full min-h-[56px] rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] font-bold text-base flex items-center justify-center gap-2"
-              >
-                <ImageIcon className="w-5 h-5" />
-                <span>Välj från mobilens album</span>
-              </button>
             </div>
           </div>
         )}
@@ -1982,9 +2707,9 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* TOAST NOTIFIERING */}
+        {/* TOAST */}
         {toastMessage && (
-          <div className="fixed left-5 right-5 bottom-28 max-w-[440px] mx-auto bg-[var(--color-text)] text-[var(--color-bg)] rounded-2xl p-4 font-semibold text-sm z-50 shadow-lg animate-in slide-in-from-bottom">
+          <div className="fixed left-5 right-5 bottom-28 max-w-[440px] mx-auto bg-[var(--color-text)] text-[var(--color-bg)] rounded-2xl p-4 font-semibold text-base z-50 shadow-lg animate-in slide-in-from-bottom">
             {toastMessage}
           </div>
         )}
@@ -2003,22 +2728,22 @@ export default function HomePage() {
               {isGeneratingListing && (
                 <div className="py-8 text-center space-y-2">
                   <Loader2 className="w-6 h-6 animate-spin mx-auto text-[var(--color-primary)]" />
-                  <p className="text-sm text-[var(--color-text-soft)]">Formulerar annonser...</p>
+                  <p className="text-base text-[var(--color-text-soft)]">Formulerar annonser...</p>
                 </div>
               )}
 
               {!isGeneratingListing && listingData && (
-                <div className="space-y-3 text-sm">
+                <div className="space-y-3 text-base">
                   <div className="flex bg-[var(--color-bg)] p-1 rounded-xl">
                     <button
                       onClick={() => setActiveListingTab("blocket")}
-                      className={`flex-1 py-1.5 rounded-lg font-bold text-xs ${activeListingTab === "blocket" ? "bg-[var(--color-surface)] shadow-xs" : "opacity-60"}`}
+                      className={`flex-1 py-1.5 rounded-lg font-bold text-sm ${activeListingTab === "blocket" ? "bg-[var(--color-surface)] shadow-xs" : "opacity-60"}`}
                     >
                       Blocket
                     </button>
                     <button
                       onClick={() => setActiveListingTab("tradera")}
-                      className={`flex-1 py-1.5 rounded-lg font-bold text-xs ${activeListingTab === "tradera" ? "bg-[var(--color-surface)] shadow-xs" : "opacity-60"}`}
+                      className={`flex-1 py-1.5 rounded-lg font-bold text-sm ${activeListingTab === "tradera" ? "bg-[var(--color-surface)] shadow-xs" : "opacity-60"}`}
                     >
                       Tradera
                     </button>
@@ -2032,7 +2757,7 @@ export default function HomePage() {
                   </div>
 
                   <div className="space-y-1">
-                    <div className="flex justify-between text-xs font-semibold">
+                    <div className="flex justify-between text-sm font-semibold">
                       <span>Rubrik</span>
                       <button 
                         onClick={() => copyToClipboard(activeListingTab === "blocket" ? listingData.blocket_title : listingData.tradera_title, "titel")} 
@@ -2041,13 +2766,13 @@ export default function HomePage() {
                         {copiedText === "titel" ? "Kopierad!" : "Kopiera"}
                       </button>
                     </div>
-                    <div className="p-2.5 rounded-xl bg-[var(--color-bg)] font-medium text-xs">
+                    <div className="p-3 rounded-xl bg-[var(--color-bg)] font-medium text-sm">
                       {activeListingTab === "blocket" ? listingData.blocket_title : listingData.tradera_title}
                     </div>
                   </div>
 
                   <div className="space-y-1">
-                    <div className="flex justify-between text-xs font-semibold">
+                    <div className="flex justify-between text-sm font-semibold">
                       <span>Text</span>
                       <button 
                         onClick={() => copyToClipboard(activeListingTab === "blocket" ? listingData.blocket_body : listingData.tradera_body, "body")} 
@@ -2056,7 +2781,7 @@ export default function HomePage() {
                         {copiedText === "body" ? "Kopierad!" : "Kopiera"}
                       </button>
                     </div>
-                    <div className="p-2.5 rounded-xl bg-[var(--color-bg)] font-medium text-xs max-h-40 overflow-y-auto whitespace-pre-line">
+                    <div className="p-3 rounded-xl bg-[var(--color-bg)] font-medium text-sm max-h-40 overflow-y-auto whitespace-pre-line">
                       {activeListingTab === "blocket" ? listingData.blocket_body : listingData.tradera_body}
                     </div>
                   </div>
@@ -2077,7 +2802,7 @@ export default function HomePage() {
                 </button>
               </div>
 
-              <div className="space-y-3 text-sm">
+              <div className="space-y-3 text-base">
                 <div>
                   <label className="text-xs font-semibold text-[var(--color-text-soft)] block mb-1">Typ av skada</label>
                   <div className="grid grid-cols-2 gap-1.5">
@@ -2086,7 +2811,7 @@ export default function HomePage() {
                         key={t.label}
                         type="button"
                         onClick={() => setIncidentType(t.label)}
-                        className={`p-2 rounded-xl border text-xs font-semibold text-left transition ${
+                        className={`p-2.5 rounded-xl border text-sm font-semibold text-left transition ${
                           incidentType === t.label ? "bg-[var(--color-primary-soft)] border-[var(--color-primary)] text-[var(--color-text)]" : "border-[var(--color-border)] opacity-70"
                         }`}
                       >
@@ -2103,7 +2828,7 @@ export default function HomePage() {
                       type="date" 
                       value={incidentDate} 
                       onChange={(e) => setIncidentDate(e.target.value)} 
-                      className="w-full px-2 py-1.5 border border-[var(--color-border)] rounded-xl text-xs bg-[var(--color-surface)]" 
+                      className="w-full px-3 py-2 border border-[var(--color-border)] rounded-xl text-sm bg-[var(--color-surface)]" 
                     />
                   </div>
                   <div>
@@ -2113,12 +2838,11 @@ export default function HomePage() {
                       placeholder="Valfritt" 
                       value={policeReportNumber} 
                       onChange={(e) => setPoliceReportNumber(e.target.value)} 
-                      className="w-full px-2 py-1.5 border border-[var(--color-border)] rounded-xl text-xs bg-[var(--color-surface)]" 
+                      className="w-full px-3 py-2 border border-[var(--color-border)] rounded-xl text-sm bg-[var(--color-surface)]" 
                     />
                   </div>
                 </div>
 
-                {/* Välj rum */}
                 <div>
                   <span className="text-xs font-semibold text-[var(--color-text-soft)] block mb-1">Välj drabbat rum</span>
                   <div className="flex flex-wrap gap-1">
@@ -2127,7 +2851,7 @@ export default function HomePage() {
                         key={r}
                         type="button"
                         onClick={() => toggleRoomItemsForIncident(r)}
-                        className="text-xs px-2.5 py-1 rounded-lg border border-[var(--color-border)] font-semibold"
+                        className="text-sm px-3 py-1.5 rounded-lg border border-[var(--color-border)] font-semibold"
                       >
                         {r}
                       </button>
@@ -2135,15 +2859,14 @@ export default function HomePage() {
                   </div>
                 </div>
 
-                {/* Lista */}
                 <div className="max-h-36 overflow-y-auto space-y-1 border border-[var(--color-border)] rounded-xl p-1 bg-[var(--color-bg)]">
-                  {vaultItems.map((item) => {
+                  {activeVaultItems.map((item) => {
                     const isSelected = selectedIncidentItemIds.includes(item.id);
                     return (
                       <div
                         key={item.id}
                         onClick={() => toggleIncidentItem(item.id)}
-                        className={`p-2 rounded-lg cursor-pointer flex items-center gap-2 text-xs ${isSelected ? "bg-[var(--color-surface)] font-bold shadow-2xs" : "opacity-60"}`}
+                        className={`p-2.5 rounded-lg cursor-pointer flex items-center gap-2 text-sm ${isSelected ? "bg-[var(--color-surface)] font-bold shadow-2xs" : "opacity-60"}`}
                       >
                         {isSelected ? <CheckSquare className="w-4 h-4 text-rose-600" /> : <Square className="w-4 h-4 opacity-40" />}
                         <span className="truncate">{item.title} ({Number(item.estimated_replacement_cost_sek).toLocaleString("sv-SE")} kr)</span>
@@ -2152,7 +2875,7 @@ export default function HomePage() {
                   })}
                 </div>
 
-                <div className="font-bold text-sm">
+                <div className="font-bold text-base">
                   Totalt anspråk: {incidentTotalCost.toLocaleString("sv-SE")} kr
                 </div>
 
@@ -2181,7 +2904,7 @@ export default function HomePage() {
                 </button>
               </div>
 
-              <form onSubmit={handleSaveManualItem} className="space-y-3 text-sm">
+              <form onSubmit={handleSaveManualItem} className="space-y-3 text-base">
                 <div>
                   <label className="text-xs font-semibold text-[var(--color-text-soft)] block mb-0.5">Benämning</label>
                   <input
@@ -2190,7 +2913,7 @@ export default function HomePage() {
                     placeholder="t.ex. Guldring 18k, Ärvt matbord"
                     value={manualFormData.title || ""}
                     onChange={(e) => setManualFormData({ ...manualFormData, title: e.target.value })}
-                    className="w-full min-h-[44px] px-3 border border-[var(--color-border)] rounded-xl font-medium bg-[var(--color-surface)]"
+                    className="w-full min-h-[48px] px-3.5 border border-[var(--color-border)] rounded-xl font-medium bg-[var(--color-surface)] text-base"
                   />
                 </div>
 
@@ -2200,7 +2923,7 @@ export default function HomePage() {
                     <select
                       value={manualFormData.room || activeRoom}
                       onChange={(e) => setManualFormData({ ...manualFormData, room: e.target.value })}
-                      className="w-full min-h-[44px] px-2 border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)]"
+                      className="w-full min-h-[48px] px-3 border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-base"
                     >
                       {roomKeys.map((r) => <option key={r} value={r}>{r}</option>)}
                     </select>
@@ -2213,7 +2936,7 @@ export default function HomePage() {
                       placeholder="12000"
                       value={manualFormData.estimated_replacement_cost_sek || ""}
                       onChange={(e) => setManualFormData({ ...manualFormData, estimated_replacement_cost_sek: Number(e.target.value) })}
-                      className="w-full min-h-[44px] px-2 border border-[var(--color-border)] rounded-xl font-bold bg-[var(--color-surface)]"
+                      className="w-full min-h-[48px] px-3 border border-[var(--color-border)] rounded-xl font-bold bg-[var(--color-surface)] text-base"
                     />
                   </div>
                 </div>
@@ -2258,16 +2981,16 @@ export default function HomePage() {
                           }
                           setShowPropertyModal(false);
                         }}
-                        className={`p-3 rounded-2xl border cursor-pointer transition flex items-center justify-between ${
+                        className={`p-3.5 rounded-2xl border cursor-pointer transition flex items-center justify-between ${
                           selectedProperty?.id === p.id ? "bg-[var(--color-primary-soft)] border-[var(--color-primary)]" : "bg-[var(--color-bg)] border-[var(--color-border)]"
                         }`}
                       >
                         <div>
                           <div className="flex items-center space-x-1.5">
-                            <h4 className="font-bold text-xs text-[var(--color-text)]">{p.name}</h4>
-                            {p.living_area_sqm && <span className="text-[10px] bg-[var(--color-surface)] text-[var(--color-text-soft)] px-1.5 py-0.2 rounded font-medium">{p.living_area_sqm} m²</span>}
+                            <h4 className="font-bold text-sm text-[var(--color-text)]">{p.name}</h4>
+                            {p.living_area_sqm && <span className="text-xs bg-[var(--color-surface)] text-[var(--color-text-soft)] px-2 py-0.5 rounded font-medium">{p.living_area_sqm} m²</span>}
                           </div>
-                          <p className="text-[10px] text-[var(--color-text-soft)]">{p.property_type} • {p.insurance_company || "Försäkringsbolag"}</p>
+                          <p className="text-xs text-[var(--color-text-soft)] mt-0.5">{p.property_type} • {p.insurance_company || "Försäkringsbolag"}</p>
                         </div>
                         <button
                           onClick={(e) => {
@@ -2275,7 +2998,7 @@ export default function HomePage() {
                             setPropertyFormData(p);
                             setIsEditingProperty(true);
                           }}
-                          className="text-[11px] text-[var(--color-primary)] font-bold px-2 py-1 rounded hover:bg-[var(--color-primary-soft)]"
+                          className="text-xs text-[var(--color-primary)] font-bold px-2.5 py-1.5 rounded hover:bg-[var(--color-primary-soft)]"
                         >
                           Ändra
                         </button>
@@ -2295,7 +3018,7 @@ export default function HomePage() {
                       });
                       setIsEditingProperty(true);
                     }}
-                    className="w-full py-2.5 border border-dashed border-[var(--color-border)] text-[var(--color-primary)] rounded-xl text-xs font-bold hover:bg-[var(--color-primary-soft)] transition"
+                    className="w-full py-3 border border-dashed border-[var(--color-border)] text-[var(--color-primary)] rounded-xl text-sm font-bold hover:bg-[var(--color-primary-soft)] transition"
                   >
                     + Lägg till ny bostad / förråd
                   </button>
@@ -2341,26 +3064,26 @@ export default function HomePage() {
                       setIsSavingProperty(false);
                     }
                   }}
-                  className="space-y-2.5 text-xs"
+                  className="space-y-3 text-sm"
                 >
                   <div>
-                    <label className="font-semibold text-[var(--color-text-soft)] block mb-0.5">Bostadens namn</label>
+                    <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Bostadens namn</label>
                     <input
                       type="text"
                       required
                       value={propertyFormData.name || ""}
                       onChange={(e) => setPropertyFormData({ ...propertyFormData, name: e.target.value })}
-                      className="w-full px-2.5 py-1.5 border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
+                      className="w-full px-3 py-2 border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)] text-base"
                     />
                   </div>
 
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="font-semibold text-[var(--color-text-soft)] block mb-0.5">Typ</label>
+                      <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Typ</label>
                       <select
                         value={propertyFormData.property_type || "Bostadsrätt"}
                         onChange={(e) => setPropertyFormData({ ...propertyFormData, property_type: e.target.value })}
-                        className="w-full px-2 py-1.5 border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
+                        className="w-full px-2 py-2 border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)] text-base"
                       >
                         <option value="Bostadsrätt">Bostadsrätt</option>
                         <option value="Villa / Småhus">Villa</option>
@@ -2370,43 +3093,43 @@ export default function HomePage() {
                       </select>
                     </div>
                     <div>
-                      <label className="font-semibold text-[var(--color-text-soft)] block mb-0.5">Boyta (kvm)</label>
+                      <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Boyta (kvm)</label>
                       <input
                         type="number"
                         value={propertyFormData.living_area_sqm || ""}
                         onChange={(e) => setPropertyFormData({ ...propertyFormData, living_area_sqm: Number(e.target.value) })}
-                        className="w-full px-2 py-1.5 border border-[var(--color-border)] rounded-xl font-bold bg-[var(--color-surface)] text-[var(--color-text)]"
+                        className="w-full px-2 py-2 border border-[var(--color-border)] rounded-xl font-bold bg-[var(--color-surface)] text-[var(--color-text)] text-base"
                       />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="font-semibold text-[var(--color-text-soft)] block mb-0.5">Lösörestak (SEK)</label>
+                      <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Lösörestak (SEK)</label>
                       <input
                         type="number"
                         value={propertyFormData.coverage_limit_sek || 1000000}
                         onChange={(e) => setPropertyFormData({ ...propertyFormData, coverage_limit_sek: Number(e.target.value) })}
-                        className="w-full px-2 py-1.5 border border-[var(--color-border)] rounded-xl font-bold bg-[var(--color-surface)] text-[var(--color-text)]"
+                        className="w-full px-2 py-2 border border-[var(--color-border)] rounded-xl font-bold bg-[var(--color-surface)] text-[var(--color-text)] text-base"
                       />
                     </div>
                     <div>
-                      <label className="font-semibold text-[var(--color-text-soft)] block mb-0.5">Bolag</label>
+                      <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Bolag</label>
                       <input
                         type="text"
                         placeholder="t.ex. Folksam"
                         value={propertyFormData.insurance_company || ""}
                         onChange={(e) => setPropertyFormData({ ...propertyFormData, insurance_company: e.target.value })}
-                        className="w-full px-2 py-1.5 border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
+                        className="w-full px-2 py-2 border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)] text-base"
                       />
                     </div>
                   </div>
 
                   <div className="pt-2 flex space-x-2">
-                    <button type="submit" disabled={isSavingProperty} className="flex-1 py-2.5 bg-[var(--color-primary)] text-white rounded-xl font-bold text-xs">
+                    <button type="submit" disabled={isSavingProperty} className="flex-1 py-3 bg-[var(--color-primary)] text-white rounded-xl font-bold text-sm">
                       {isSavingProperty ? "Sparar..." : "Spara"}
                     </button>
-                    <button type="button" onClick={() => setIsEditingProperty(false)} className="px-3 py-2.5 bg-[var(--color-border)] text-[var(--color-text)] rounded-xl text-xs font-semibold">
+                    <button type="button" onClick={() => setIsEditingProperty(false)} className="px-4 py-3 bg-[var(--color-border)] text-[var(--color-text)] rounded-xl text-sm font-semibold">
                       Tillbaka
                     </button>
                   </div>
@@ -2427,13 +3150,13 @@ export default function HomePage() {
                 <h3 className="text-lg font-bold text-[var(--color-text)]">
                   {authIsSignUp ? "Säkra ditt hem" : "Logga in"}
                 </h3>
-                <p className="text-xs text-[var(--color-text-soft)]">
+                <p className="text-sm text-[var(--color-text-soft)]">
                   Dina inventarier krypteras och sparas tryggt.
                 </p>
               </div>
 
               {authError && (
-                <div className="bg-rose-50 text-rose-800 p-2.5 rounded-xl text-xs">
+                <div className="bg-rose-50 text-rose-800 p-2.5 rounded-xl text-sm">
                   {authError}
                 </div>
               )}
@@ -2445,7 +3168,7 @@ export default function HomePage() {
                   placeholder="din.epost@exempel.se"
                   value={authEmail}
                   onChange={(e) => setAuthEmail(e.target.value)}
-                  className="w-full min-h-[48px] px-3.5 border border-[var(--color-border)] rounded-xl text-sm bg-[var(--color-surface)] text-[var(--color-text)]"
+                  className="w-full min-h-[48px] px-3.5 border border-[var(--color-border)] rounded-xl text-base bg-[var(--color-surface)] text-[var(--color-text)]"
                 />
                 <input
                   type="password"
@@ -2454,7 +3177,7 @@ export default function HomePage() {
                   placeholder="Lösenord"
                   value={authPassword}
                   onChange={(e) => setAuthPassword(e.target.value)}
-                  className="w-full min-h-[48px] px-3.5 border border-[var(--color-border)] rounded-xl text-sm bg-[var(--color-surface)] text-[var(--color-text)]"
+                  className="w-full min-h-[48px] px-3.5 border border-[var(--color-border)] rounded-xl text-base bg-[var(--color-surface)] text-[var(--color-text)]"
                 />
                 <button
                   type="submit"
@@ -2468,8 +3191,8 @@ export default function HomePage() {
               <div className="text-center">
                 <button
                   type="button"
-                  onClick={() => setAuthIsSignUp(!authIsSignUp)}
-                  className="text-xs text-[var(--color-primary)] font-bold hover:underline"
+                  onClick={() => authIsSignUp ? setAuthIsSignUp(false) : setAuthIsSignUp(true)}
+                  className="text-sm text-[var(--color-primary)] font-bold hover:underline"
                 >
                   {authIsSignUp ? "Har du redan ett konto? Logga in" : "Inget konto? Skapa ett"}
                 </button>
