@@ -50,7 +50,9 @@ import {
   ExternalLink,
   Archive,
   RotateCcw,
-  Scale
+  Scale,
+  WifiOff,
+  Wifi
 } from "lucide-react";
 import { sanitizeAndCompressImage } from "@/lib/sanitizeImage";
 import { supabase } from "@/lib/supabaseClient";
@@ -207,9 +209,17 @@ function requiresManualOrCare(item: VaultItem): boolean {
   return applianceKeywords.some((word) => text.includes(word));
 }
 
+const FREE_ITEM_LIMIT = 20;
+
 export default function HomePage() {
   const [currentNav, setCurrentNav] = useState<"home" | "rooms" | "insurance" | "more">("home");
   const [sessionUser, setSessionUser] = useState<any>(null);
+
+  // Pro & Offlineläge state
+  const [isPro, setIsPro] = useState(false);
+  const [showProModal, setShowProModal] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
+  const [offlineQueue, setOfflineQueue] = useState<any[]>([]);
 
   const [displayName, setDisplayName] = useState<string>("");
   const [displayNameInput, setDisplayNameInput] = useState<string>("");
@@ -301,6 +311,76 @@ export default function HomePage() {
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  // Nätverkslyssnare för offlinestöd (Funktion G)
+  useEffect(() => {
+    setIsOnline(navigator.onLine);
+
+    const handleOnline = () => {
+      setIsOnline(true);
+      showToast("Åter ansluten till nätet ✓");
+      processOfflineQueue();
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+      showToast("Tappade anslutningen. Offlineläge aktivt.");
+    };
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
+    // Läs lokal offline-kö vid start
+    const savedQueue = localStorage.getItem("prylkoll_offline_queue");
+    if (savedQueue) {
+      try {
+        setOfflineQueue(JSON.parse(savedQueue));
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
+
+  const processOfflineQueue = async () => {
+    const queue = JSON.parse(localStorage.getItem("prylkoll_offline_queue") || "[]");
+    if (queue.length === 0 || !sessionUser) return;
+
+    showToast(`Synkar ${queue.length} offline-sparade prylar...`);
+
+    const remainingQueue = [];
+    for (const item of queue) {
+      try {
+        await supabase.from("items").insert({
+          user_id: sessionUser.id,
+          property_id: selectedProperty?.id || null,
+          title: item.title,
+          category: item.category,
+          room: item.room,
+          brand: item.brand,
+          model: item.model,
+          estimated_replacement_cost_sek: item.estimated_replacement_cost_sek,
+          market_value_sek: item.market_value_sek,
+          condition: item.condition,
+          is_archived: false
+        });
+      } catch (err) {
+        remainingQueue.push(item);
+      }
+    }
+
+    localStorage.setItem("prylkoll_offline_queue", JSON.stringify(remainingQueue));
+    setOfflineQueue(remainingQueue);
+    if (sessionUser) {
+      fetchVaultStats(sessionUser.id, selectedProperty?.id);
+      fetchVaultItems(sessionUser.id, selectedProperty?.id);
+    }
+    showToast("Synkning klar ✓");
   };
 
   useEffect(() => {
@@ -802,12 +882,37 @@ export default function HomePage() {
     setShowAddActionSheet(false);
     setShowRoomPickerScreen(false);
     setResult(null);
+
+    // Pro-gränskoll
+    if (!isPro && activeVaultItems.length >= FREE_ITEM_LIMIT) {
+      setShowProModal(true);
+      return;
+    }
+
     setIsAnalyzing(true);
 
     try {
       const processed = await sanitizeAndCompressImage(file);
       setPreviewUrl(processed.previewUrl);
       setBase64ForSave(processed.base64ForGemini);
+
+      // Om offline, hoppa över AI och skapa direkt med grunddata
+      if (!navigator.onLine) {
+        setIsAnalyzing(false);
+        setResult({
+          title: "Pryl (Ofullständig pga offlineläge)",
+          category: "Övrigt hem & inredning",
+          brand: "",
+          model: "",
+          estimated_replacement_cost_sek: 1000,
+          market_value_sek: 500,
+          condition: "Mycket gott",
+          serial_number_hint: "",
+          confidence: 1
+        });
+        showToast("Offlineläge: Fyll i uppgifter manuellt och spara.");
+        return;
+      }
 
       const res = await fetch("/api/analyze", {
         method: "POST",
@@ -822,7 +927,20 @@ export default function HomePage() {
         alert(response.error || "Kunde inte tolka föremålet.");
       }
     } catch (err: unknown) {
-      alert(`Nätverksfel: ${err instanceof Error ? err.message : String(err)}`);
+      // Om nätverksfel uppstår vid anropet, aktivera offlineläge-fallback
+      setIsAnalyzing(false);
+      setResult({
+        title: "Pryl (Sparad offline)",
+        category: "Övrigt hem & inredning",
+        brand: "",
+        model: "",
+        estimated_replacement_cost_sek: 1000,
+        market_value_sek: 500,
+        condition: "Mycket gott",
+        serial_number_hint: "",
+        confidence: 1
+      });
+      showToast("Ingen anslutning. Sparad i offline-kö.");
     } finally {
       setIsAnalyzing(false);
     }
@@ -833,6 +951,33 @@ export default function HomePage() {
     setIsSaving(true);
 
     try {
+      // Om offline: spara i lokal storage-kö (Funktion G)
+      if (!navigator.onLine) {
+        const offlineItem = {
+          id: `offline-${Date.now()}`,
+          user_id: userId,
+          title: result.title,
+          category: result.category,
+          room: activeRoom,
+          brand: result.brand,
+          model: result.model,
+          estimated_replacement_cost_sek: result.estimated_replacement_cost_sek,
+          market_value_sek: result.market_value_sek,
+          condition: result.condition,
+          created_at: new Date().toISOString()
+        };
+        const currentQueue = JSON.parse(localStorage.getItem("prylkoll_offline_queue") || "[]");
+        localStorage.setItem("prylkoll_offline_queue", JSON.stringify([...currentQueue, offlineItem]));
+        setOfflineQueue([...currentQueue, offlineItem]);
+
+        setResult(null);
+        setPreviewUrl(null);
+        setBase64ForSave(null);
+        setIsSaving(false);
+        showToast("Sparad i offline-kö! Synkas när du får nät.");
+        return;
+      }
+
       const byteCharacters = atob(base64ForSave);
       const byteNumbers = new Array(byteCharacters.length);
       for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
@@ -895,12 +1040,16 @@ export default function HomePage() {
       setShowAuthModal(true);
       return;
     }
+    if (!isPro && activeVaultItems.length >= FREE_ITEM_LIMIT) {
+      setShowProModal(true);
+      return;
+    }
     if (!manualFormData.title) return;
 
     setIsSavingManual(true);
     try {
       let uploadedFileName = null;
-      if (manualPhotoFile) {
+      if (manualPhotoFile && navigator.onLine) {
         const processed = await sanitizeAndCompressImage(manualPhotoFile);
         const byteCharacters = atob(processed.base64ForGemini);
         const byteNumbers = new Array(byteCharacters.length);
@@ -1099,6 +1248,14 @@ export default function HomePage() {
     <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)] flex justify-center selection:bg-[var(--color-primary-soft)] selection:text-[var(--color-primary)]">
       <div className="w-full max-w-[480px] min-h-screen flex flex-col relative pb-32">
 
+        {/* OFFLINE BANNER (Funktion G) */}
+        {!isOnline && (
+          <div className="bg-amber-600 text-white text-xs font-bold px-4 py-2 text-center flex items-center justify-center gap-2 z-30">
+            <WifiOff className="w-4 h-4" />
+            <span>Offlineläge aktivt ({offlineQueue.length} i kö)</span>
+          </div>
+        )}
+
         {/* TOPPBAR (64 px) */}
         {!showRoomPickerScreen && !isAnalyzing && !result && !editingItem && !showArchiveHub && (
           <header className="h-16 px-5 flex items-center justify-between z-20">
@@ -1118,16 +1275,26 @@ export default function HomePage() {
               </button>
             </div>
 
-            <button
-              onClick={() => {
-                setDisplayNameInput(displayName);
-                setShowProfileModal(true);
-              }}
-              className="w-11 h-11 rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)] flex items-center justify-center font-bold text-base border-0 hover:opacity-90 active:scale-95 transition"
-              aria-label="Profil och inställningar"
-            >
-              {avatarLetter}
-            </button>
+            <div className="flex items-center gap-2">
+              {!isPro && (
+                <button
+                  onClick={() => setShowProModal(true)}
+                  className="px-3 py-1.5 rounded-full bg-[var(--color-primary)] text-white text-xs font-extrabold shadow-xs"
+                >
+                  PRO
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  setDisplayNameInput(displayName);
+                  setShowProfileModal(true);
+                }}
+                className="w-11 h-11 rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)] flex items-center justify-center font-bold text-base border-0 hover:opacity-90 active:scale-95 transition"
+                aria-label="Profil och inställningar"
+              >
+                {avatarLetter}
+              </button>
+            </div>
           </header>
         )}
 
@@ -1990,7 +2157,7 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* DETALJVY (OMSTRUKTURERAD ORDNING UTAN AI-FLUFF) */}
+          {/* DETALJVY */}
           {editingItem && !showArchiveHub && (
             <div className="space-y-4 animate-in fade-in pt-1 pb-6">
               <div className="flex items-center justify-between bg-[var(--color-primary-soft)] p-3 rounded-2xl border border-[var(--color-border)]">
@@ -2012,7 +2179,6 @@ export default function HomePage() {
                 </button>
               </div>
 
-              {/* 1. BILDGALLERI */}
               <div className="space-y-2">
                 {editingItem.imageUrls && editingItem.imageUrls.length > 0 ? (
                   <div className="relative h-64 rounded-3xl overflow-hidden bg-[var(--color-surface)] border border-[var(--color-border)] shadow-xs">
@@ -2073,7 +2239,6 @@ export default function HomePage() {
                 </div>
               </div>
 
-              {/* 2. KÄRNUPPGIFTER (Benämning, Rum, Märke, Modell, Värden) */}
               <form onSubmit={handleSaveItemUpdates} className="space-y-4 text-sm">
                 <div>
                   <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Benämning</label>
@@ -2141,7 +2306,6 @@ export default function HomePage() {
                   </div>
                 </div>
 
-                {/* 3. KVITTO & GARANTIVAKT */}
                 <div className="bg-[var(--color-surface)] p-4 rounded-3xl border border-[var(--color-border)] shadow-card space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-base font-bold text-[var(--color-text)]">
@@ -2225,7 +2389,6 @@ export default function HomePage() {
                   </div>
                 </div>
 
-                {/* 4. SERIENUMMER (UTAN AI-TIPS-PRATA) */}
                 <div>
                   <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Serienummer / PNC</label>
                   <input
@@ -2237,7 +2400,6 @@ export default function HomePage() {
                   />
                 </div>
 
-                {/* 5. SKÖTSEL & MANUAL (OM TILLÄMPLIGT) */}
                 {requiresManualOrCare(editingItem) && (
                   <div className="bg-[var(--color-surface)] p-4 rounded-3xl border border-[var(--color-border)] shadow-card space-y-3">
                     <div className="flex items-center gap-2 text-base font-bold text-[var(--color-text)]">
@@ -2265,7 +2427,6 @@ export default function HomePage() {
                   </div>
                 )}
 
-                {/* 6. SÄLJANNONS */}
                 <button
                   type="button"
                   onClick={() => handleOpenListingModal(editingItem)}
@@ -2379,6 +2540,81 @@ export default function HomePage() {
           </nav>
         )}
 
+        {/* PRO-MODAL */}
+        {showProModal && (
+          <div 
+            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in"
+            onClick={() => setShowProModal(false)}
+          >
+            <div 
+              className="bg-[var(--color-surface)] rounded-3xl p-6 w-full max-w-sm border border-[var(--color-border)] space-y-5 shadow-2xl animate-in slide-in-from-bottom"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex justify-between items-center">
+                <div className="w-12 h-12 rounded-2xl bg-[var(--color-primary-soft)] text-[var(--color-primary)] flex items-center justify-center font-black text-xl">
+                  PRO
+                </div>
+                <button onClick={() => setShowProModal(false)} className="text-[var(--color-text-soft)]">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-2 text-left">
+                <h3 className="text-xl font-extrabold text-[var(--color-text)]">
+                  Säkra hela ditt hem med PrylKoll Pro
+                </h3>
+                <p className="text-sm text-[var(--color-text-soft)] leading-relaxed">
+                  Du har nått gränsen för gratisversionen ({FREE_ITEM_LIMIT} prylar). Lås upp alla funktioner och skydda dina värdesaker på riktigt:
+                </p>
+              </div>
+
+              <div className="space-y-2.5 text-sm font-medium text-[var(--color-text)] text-left">
+                <div className="flex items-center gap-2.5">
+                  <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                  <span>Obegränsat antal prylar och kvitton</span>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                  <span>Flera bostäder (t.ex. sommarstuga & förråd)</span>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                  <span>Hushållsdelning (dela valvet med partner)</span>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                  <span>Det skarpa skadepaketet & PDF-rapporter</span>
+                </div>
+              </div>
+
+              <div className="space-y-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPro(true);
+                    setShowProModal(false);
+                    showToast("Pro aktiverat (Demoläge) ✓");
+                  }}
+                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98]"
+                >
+                  <span>Starta PrylKoll Pro (349 kr/år)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPro(true);
+                    setShowProModal(false);
+                    showToast("Pro aktiverat (Demoläge) ✓");
+                  }}
+                  className="min-h-[44px] w-full text-[var(--color-text-soft)] text-sm font-semibold hover:underline"
+                >
+                  eller 39 kr/mån (ingen bindningstid)
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* PROFIL- & VALVHANTERINGSMODAL */}
         {showProfileModal && (
           <div 
@@ -2399,7 +2635,7 @@ export default function HomePage() {
                       {displayName || "Min Profil"}
                     </h2>
                     <span className="text-xs text-[var(--color-text-soft)] block">
-                      {sessionUser?.email || "Inloggad"}
+                      {sessionUser?.email || "Inloggad"} {isPro ? "· Pro-användare" : ""}
                     </span>
                   </div>
                 </div>
@@ -2410,6 +2646,24 @@ export default function HomePage() {
                   <X className="w-5 h-5" />
                 </button>
               </div>
+
+              {!isPro && (
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-[var(--color-primary-soft)] to-[var(--color-surface)] border border-[var(--color-primary)] flex items-center justify-between">
+                  <div>
+                    <b className="text-sm block">Uppgradera till Pro</b>
+                    <span className="text-xs text-[var(--color-text-soft)]">Lås upp obegränsade prylar & skadepaket</span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setShowProfileModal(false);
+                      setShowProModal(true);
+                    }}
+                    className="px-4 py-2 rounded-xl bg-[var(--color-primary)] text-white text-xs font-bold shadow-xs"
+                  >
+                    Uppgradera
+                  </button>
+                </div>
+              )}
 
               <form onSubmit={handleSaveDisplayName} className="space-y-2 p-4 rounded-2xl bg-[var(--color-bg)] border border-[var(--color-border)]">
                 <label className="text-xs font-semibold text-[var(--color-text-soft)] block">Ditt namn i appen</label>
