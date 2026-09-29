@@ -1,4 +1,5 @@
 
+![PrylKoll Hero](./public/prylkoll-hero.jpg)
 
 # 🏠 PrylKoll
 
