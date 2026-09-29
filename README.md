@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="https://images.unsplash.com/photo-1558655146-d09347e92766?q=80&w=1000&auto=format&fit=crop" alt="PrylKoll Banner" width="100%" style="border-radius: 12px;"/>
-</p>
-
 # 🏠 PrylKoll
 
 **PrylKoll** är en modern, mobilanpassad webbapplikation för digital hemma-inventering, garanti- och försäkringshantering samt smart tillgångshantering. Applikationen är byggd med fokus på en friktionsfri användarupplevelse utan tekniskt AI-brus, och hjälper dig att säkra dina ägodelar på riktigt.
