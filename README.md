@@ -1,3 +1,5 @@
+
+
 # 🏠 PrylKoll
 
 **PrylKoll** är en modern, mobilanpassad webbapplikation för digital hemma-inventering, garanti- och försäkringshantering samt smart tillgångshantering. Applikationen är byggd med fokus på en friktionsfri användarupplevelse utan tekniskt AI-brus, och hjälper dig att säkra dina ägodelar på riktigt.
