@@ -53,7 +53,9 @@ import {
   Scale,
   WifiOff,
   Layers,
-  MousePointerClick
+  MousePointerClick,
+  Download,
+  Share2
 } from "lucide-react";
 import { sanitizeAndCompressImage } from "@/lib/sanitizeImage";
 import { supabase } from "@/lib/supabaseClient";
@@ -85,7 +87,6 @@ const INCIDENT_TYPES = [
   { label: "Allrisk / Drulle", icon: AlertTriangle },
 ];
 
-// Lugna, korta statusmeddelanden under analys
 const SCAN_MESSAGES = [
   "Letar efter prylar i bilden...",
   "Känner igen modeller och skick...",
@@ -221,7 +222,6 @@ function requiresManualOrCare(item: VaultItem): boolean {
   return applianceKeywords.some((word) => text.includes(word));
 }
 
-// Auto-crop: Klipper ut en skarp närbild baserat på box_2d
 async function cropImageFromBox(
   imageSrc: string,
   box: [number, number, number, number],
@@ -284,7 +284,6 @@ export default function HomePage() {
   const [currentNav, setCurrentNav] = useState<"home" | "rooms" | "insurance" | "more">("home");
   const [sessionUser, setSessionUser] = useState<any>(null);
 
-  // Pro & Offlineläge state
   const [isPro, setIsPro] = useState(false);
   const [showProModal, setShowProModal] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
@@ -316,12 +315,10 @@ export default function HomePage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Mjuk UX-övergång under skanning
   const [scanMessageIndex, setScanMessageIndex] = useState(0);
   const [isTextFading, setIsTextFading] = useState(false);
   const [scanIconIndex, setScanIconIndex] = useState(0);
 
-  // Analysresultat
   const [result, setResult] = useState<ItemAnalysisResult | null>(null);
   const [multiResults, setMultiResults] = useState<ItemAnalysisResult[]>([]);
   const [selectedMultiIndices, setSelectedMultiIndices] = useState<number[]>([]);
@@ -359,7 +356,7 @@ export default function HomePage() {
   const [listingModalItem, setListingModalItem] = useState<VaultItem | null>(null);
   const [listingData, setListingData] = useState<any>(null);
   const [isGeneratingListing, setIsGeneratingListing] = useState(false);
-  const [activeListingTab, setActiveListingTab] = useState<"blocket" | "tradera">("blocket");
+  const [activeListingTab, setActiveListingTab] = useState<"blocket" | "marketplace" | "tradera">("blocket");
   const [copiedText, setCopiedText] = useState<string | null>(null);
 
   const [showIncidentModal, setShowIncidentModal] = useState(false);
@@ -391,7 +388,6 @@ export default function HomePage() {
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  // Mjuk och harmonisk textövergång under skanning (3,2 sekunder)
   useEffect(() => {
     if (!isAnalyzing) return;
 
@@ -973,7 +969,57 @@ export default function HomePage() {
     setTimeout(() => setCopiedText(null), 2500);
   };
 
-  // Bildanalys
+  // Direktstart: Laddar ner bild, kopierar text & öppnar respektive marknadsplats
+  const handleLaunchPlatform = async (platform: "blocket" | "marketplace" | "tradera") => {
+    if (!listingModalItem || !listingData) return;
+
+    let textToCopy = "";
+    let destinationUrl = "";
+
+    if (platform === "blocket") {
+      textToCopy = `${listingData.blocket_title || listingModalItem.title}\n\nPris: ${listingData.suggested_price_sek || listingModalItem.market_value_sek} kr\nSkick: ${listingModalItem.condition}\n\n${listingData.blocket_body || ""}`;
+      destinationUrl = "https://www.blocket.se/create-item/start";
+    } else if (platform === "marketplace") {
+      textToCopy = `${listingData.blocket_title || listingModalItem.title}\n\nPris: ${listingData.suggested_price_sek || listingModalItem.market_value_sek} kr\nSkick: ${listingModalItem.condition}\n\n${listingData.blocket_body || ""}\n\nBetalning sker via Swish. Hämtas på plats!`;
+      destinationUrl = "https://www.facebook.com/marketplace/create/item";
+    } else {
+      textToCopy = `${listingData.tradera_title || listingModalItem.title}\n\nStartbud: ${listingData.tradera_start_bid_sek || 49} kr\nSkick: ${listingModalItem.condition}\n\n${listingData.tradera_body || ""}`;
+      // Traderas stabila ingång för att starta nytt utkast
+      destinationUrl = "https://www.tradera.com/selling/new";
+    }
+
+    // Öppna direkt i klickhändelsen för att kringgå popup-blockerare i iOS Safari
+    window.open(destinationUrl, "_blank", "noopener,noreferrer");
+
+    // Kopiera texten till urklipp
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+    } catch (e) {
+      console.error("Urklipp misslyckades:", e);
+    }
+
+    // Ladda ner den utskurna bilden så att den hamnar överst i telefonens album
+    if (listingModalItem.imageUrl) {
+      try {
+        const res = await fetch(listingModalItem.imageUrl);
+        const blob = await res.blob();
+        const blobUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        a.download = `${listingModalItem.title.replace(/[^a-zA-Z0-9åäöÅÄÖ]/g, "_")}.jpg`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(blobUrl);
+      } catch (err) {
+        console.warn("Kunde inte ladda ner bild:", err);
+      }
+    }
+
+    const platformName = platform === "blocket" ? "Blocket" : platform === "marketplace" ? "Marketplace" : "Tradera";
+    showToast(`Bild sparad & text kopierad! Klistra in på ${platformName} ✓`);
+  };
+
   const handleImageSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1065,7 +1111,6 @@ export default function HomePage() {
     );
   };
 
-  // Spara en enskild pryl
   const executeSaveAiItem = async (userId: string) => {
     if (!result || !base64ForSave) return;
     setIsSaving(true);
@@ -1153,7 +1198,6 @@ export default function HomePage() {
     }
   };
 
-  // Masspara valda föremål med automatisk utskärning (Auto-Crop)
   const executeSaveMultiItems = async (userId: string) => {
     const itemsToSave = multiResults.filter((_, idx) => selectedMultiIndices.includes(idx));
     if (itemsToSave.length === 0 || !base64ForSave || !previewUrl) return;
@@ -1165,7 +1209,6 @@ export default function HomePage() {
 
     setIsSaving(true);
     try {
-      // 1. Spara originalöversikten en gång
       const byteCharacters = atob(base64ForSave);
       const byteNumbers = new Array(byteCharacters.length);
       for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
@@ -1177,7 +1220,6 @@ export default function HomePage() {
         upsert: true 
       });
 
-      // 2. Skär ut och ladda upp en närbild för varje vald pryl via Canvas
       const inserts = [];
 
       for (let i = 0; i < itemsToSave.length; i++) {
@@ -1201,7 +1243,6 @@ export default function HomePage() {
           }
         }
 
-        // Bild 1 = närbilden (blir thumbnail), Bild 2 = rummsöversikten
         const finalImagePaths = itemCroppedFileName !== overviewFileName
           ? [itemCroppedFileName, overviewFileName]
           : [overviewFileName];
@@ -1459,7 +1500,6 @@ export default function HomePage() {
     <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)] flex justify-center selection:bg-[var(--color-primary-soft)] selection:text-[var(--color-primary)]">
       <div className="w-full max-w-[480px] min-h-screen flex flex-col relative pb-32">
 
-        {/* OFFLINE BANNER */}
         {!isOnline && (
           <div className="bg-amber-600 text-white text-xs font-bold px-4 py-2 text-center flex items-center justify-center gap-2 z-30">
             <WifiOff className="w-4 h-4" />
@@ -1467,7 +1507,6 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* TOPPBAR (64 px) */}
         {!showRoomPickerScreen && !isAnalyzing && !result && multiResults.length === 0 && !editingItem && !showArchiveHub && (
           <header className="h-16 px-5 flex items-center justify-between z-20">
             <div className="flex items-center gap-2.5">
@@ -1509,7 +1548,6 @@ export default function HomePage() {
           </header>
         )}
 
-        {/* Dolda fil-inputs */}
         <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleImageSelected} className="hidden" />
         <input ref={galleryInputRef} type="file" accept="image/*" onChange={handleImageSelected} className="hidden" />
         <input ref={receiptInputRef} type="file" accept="image/*" onChange={handleReceiptUpload} className="hidden" />
@@ -1523,10 +1561,8 @@ export default function HomePage() {
         <input ref={editItemCameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleUploadAdditionalPhoto} className="hidden" />
         <input ref={editItemGalleryInputRef} type="file" accept="image/*" onChange={handleUploadAdditionalPhoto} className="hidden" />
 
-        {/* HUVUDINNEHÅLL */}
         <main className="flex-1 px-5 pt-1 space-y-6 overflow-y-auto">
 
-          {/* RUMSLÄGET */}
           {showRoomPickerScreen && !isAnalyzing && !result && multiResults.length === 0 && !editingItem && !showArchiveHub && (
             <div className="space-y-4 animate-in fade-in pt-2">
               <button 
@@ -1584,11 +1620,8 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* AI-SKANNING PÅGÅR: REN, LUGN OCH HARMONISK UX */}
           {isAnalyzing && (
             <div className="py-16 text-center space-y-7 animate-in fade-in select-none">
-              
-              {/* Fotobehållare med mjuk glöd och svepande scannerlinje */}
               <div className="relative w-52 h-52 mx-auto">
                 <div className="absolute -inset-2 bg-gradient-to-tr from-[var(--color-primary)] via-emerald-400 to-amber-300 rounded-[34px] opacity-35 blur-md animate-pulse" />
 
@@ -1603,18 +1636,14 @@ export default function HomePage() {
                   ) : (
                     <Camera className="w-16 h-16 text-[var(--color-primary)] opacity-40 animate-pulse" />
                   )}
-
-                  {/* Lugn vertikal scannerlinje */}
                   <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-[var(--color-primary)] to-transparent shadow-[0_0_12px_#2dd4bf] animate-[bounce_2.5s_infinite]" />
                 </div>
 
-                {/* Diskret roterande pryl-badge */}
                 <div className="absolute -bottom-2.5 -right-2.5 w-12 h-12 rounded-2xl bg-[var(--color-surface)] border-2 border-[var(--color-primary)] shadow-lg flex items-center justify-center text-2xl transition-all duration-300">
                   <span>{SCAN_ICONS[scanIconIndex]}</span>
                 </div>
               </div>
 
-              {/* Lugn textrad med mjuk fade-övergång */}
               <div className="px-6 max-w-xs mx-auto min-h-[48px] flex items-center justify-center">
                 <h2 
                   className={`text-[19px] font-extrabold text-[var(--color-text)] transition-opacity duration-300 ${
@@ -1624,11 +1653,9 @@ export default function HomePage() {
                   {SCAN_MESSAGES[scanMessageIndex]}
                 </h2>
               </div>
-
             </div>
           )}
 
-          {/* MULTIOBJEKT POINT-AND-PICK (När 2+ föremål upptäcks) */}
           {multiResults.length > 0 && !isAnalyzing && (
             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-200">
               <div className="flex items-center justify-between">
@@ -1658,13 +1685,11 @@ export default function HomePage() {
                 </p>
               </div>
 
-              {/* INTERAKTIVT FOTO MED VISUELLA PINS & BOXAR */}
               {previewUrl && (
                 <div className="relative rounded-3xl overflow-hidden bg-black border border-[var(--color-border)] shadow-md select-none">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={previewUrl} alt="Översiktsbild" className="w-full h-auto max-h-[380px] object-contain block mx-auto" />
                   
-                  {/* Utritade klickbara boxar direkt på bilden */}
                   {multiResults.map((item, idx) => {
                     if (!item.box_2d || item.box_2d.length < 4) return null;
                     const [ymin, xmin, ymax, xmax] = item.box_2d;
@@ -1697,7 +1722,6 @@ export default function HomePage() {
                 </div>
               )}
 
-              {/* LISTA MED DETEKTERADE PRYLAR */}
               <div className="space-y-2.5 pt-1">
                 {multiResults.map((item, idx) => {
                   const isChecked = selectedMultiIndices.includes(idx);
@@ -1770,7 +1794,6 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* ENSKILT AI-RESULTATKORT */}
           {result && !isAnalyzing && multiResults.length === 0 && (
             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-200">
               <button 
@@ -1867,7 +1890,6 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* FLIK 1: HEM */}
           {!showRoomPickerScreen && !isAnalyzing && !result && multiResults.length === 0 && !editingItem && !showArchiveHub && currentNav === "home" && (
             <div className="space-y-6 animate-in fade-in">
               <div>
@@ -2043,7 +2065,6 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* FLIK 2: RUM */}
           {!showRoomPickerScreen && !isAnalyzing && !result && multiResults.length === 0 && !editingItem && !showArchiveHub && currentNav === "rooms" && (
             <div className="space-y-4 animate-in fade-in">
               <h1 className="text-[24px] font-extrabold text-[var(--color-text)] pt-1">Dina rum</h1>
@@ -2142,7 +2163,6 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* FLIK 3: FÖRSÄKRING & GARANTI */}
           {!showRoomPickerScreen && !isAnalyzing && !result && multiResults.length === 0 && !editingItem && !showArchiveHub && currentNav === "insurance" && (
             <div className="space-y-6 animate-in fade-in">
               <h1 className="text-[24px] font-extrabold text-[var(--color-text)] pt-1">Försäkring & Garanti</h1>
@@ -2285,7 +2305,6 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* FLIK 4: MER */}
           {!showRoomPickerScreen && !isAnalyzing && !result && multiResults.length === 0 && !editingItem && !showArchiveHub && currentNav === "more" && (
             <div className="space-y-5 animate-in fade-in">
               <div>
@@ -2383,7 +2402,6 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* DEDIKERAD ARKIV-SKÄRM */}
           {showArchiveHub && (
             <div className="space-y-4 animate-in fade-in pt-1 pb-6">
               <button 
@@ -2469,7 +2487,6 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* DETALJVY */}
           {editingItem && !showArchiveHub && (
             <div className="space-y-4 animate-in fade-in pt-1 pb-6">
               <div className="flex items-center justify-between bg-[var(--color-primary-soft)] p-3 rounded-2xl border border-[var(--color-border)]">
@@ -2745,7 +2762,7 @@ export default function HomePage() {
                   className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary-soft)] border border-[var(--color-primary)] font-bold text-base flex items-center justify-center gap-2.5 text-[var(--color-primary)] shadow-card active:scale-[.98] transition"
                 >
                   <ShoppingBag className="w-5 h-5" />
-                  <span>Skapa säljannons (Blocket / Tradera)</span>
+                  <span>Sälj pryl (Blocket / Marketplace / Tradera)</span>
                 </button>
 
                 <div>
@@ -2790,7 +2807,6 @@ export default function HomePage() {
           )}
         </main>
 
-        {/* BOTTENMENY */}
         {!showRoomPickerScreen && !isAnalyzing && !result && multiResults.length === 0 && !editingItem && !showArchiveHub && (
           <nav className="fixed bottom-0 left-0 right-0 z-40 bg-[var(--color-surface)] border-t border-[var(--color-border)] h-[70px] flex items-center justify-around px-2 shadow-sm">
             <div className="w-full max-w-[480px] mx-auto flex items-center justify-around">
@@ -2852,7 +2868,6 @@ export default function HomePage() {
           </nav>
         )}
 
-        {/* PRO-MODAL */}
         {showProModal && (
           <div 
             className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in"
@@ -2927,7 +2942,6 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* PROFIL- & VALVHANTERINGSMODAL */}
         {showProfileModal && (
           <div 
             className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in"
@@ -3046,7 +3060,6 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* ARKIVERINGS-SHEET */}
         {itemToArchive && (
           <div 
             className="fixed inset-0 z-60 bg-black/45 flex items-end animate-in fade-in"
@@ -3104,7 +3117,6 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* RADERINGS-BEKRÄFTELSE */}
         {itemToDelete && (
           <div 
             className="fixed inset-0 z-60 bg-black/45 flex items-end animate-in fade-in"
@@ -3143,7 +3155,6 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* ACTION SHEET FÖR FOTO */}
         {showEditPhotoOptions && (
           <div 
             className="fixed inset-0 z-60 bg-black/45 flex items-end"
@@ -3183,7 +3194,6 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* ACTION SHEET FÖR LÄGG TILL */}
         {showAddActionSheet && (
           <div 
             className="fixed inset-0 z-50 bg-black/45 flex items-end animate-in fade-in"
@@ -3246,7 +3256,6 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* KVITTO LIGHTBOX */}
         {viewingReceiptUrl && (
           <div 
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-xs animate-in fade-in" 
@@ -3273,91 +3282,177 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* TOAST */}
         {toastMessage && (
           <div className="fixed left-5 right-5 bottom-28 max-w-[440px] mx-auto bg-[var(--color-text)] text-[var(--color-bg)] rounded-2xl p-4 font-semibold text-base z-50 shadow-lg animate-in slide-in-from-bottom">
             {toastMessage}
           </div>
         )}
 
-        {/* SÄLJANNONS MODAL */}
+        {/* SÄLJANNONS MODAL (BLOCKET, MARKETPLACE & TRADERA) */}
         {listingModalItem && (
-          <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-            <div className="bg-[var(--color-surface)] rounded-3xl p-5 w-full max-w-sm border border-[var(--color-border)] space-y-4">
-              <div className="flex justify-between items-center">
-                <b className="text-base text-[var(--color-text)]">AI-säljannons</b>
-                <button onClick={() => setListingModalItem(null)} className="text-[var(--color-text-soft)]">
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
+            <div className="bg-[var(--color-surface)] rounded-t-[32px] sm:rounded-3xl p-5 w-full max-w-[440px] border border-[var(--color-border)] space-y-4 max-h-[90vh] overflow-y-auto shadow-2xl animate-in slide-in-from-bottom">
+              
+              <div className="flex items-center justify-between pb-2 border-b border-[var(--color-border)]">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-12 h-12 rounded-xl bg-[var(--color-primary-soft)] overflow-hidden flex-shrink-0 flex items-center justify-center text-xl border border-[var(--color-border)]">
+                    {listingModalItem.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={listingModalItem.imageUrl} alt={listingModalItem.title} className="w-full h-full object-cover" />
+                    ) : (
+                      <span>📦</span>
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <b className="text-base text-[var(--color-text)] block truncate">{listingModalItem.title}</b>
+                    <span className="text-xs text-[var(--color-text-soft)] block">Välj var du vill sälja</span>
+                  </div>
+                </div>
+                <button onClick={() => setListingModalItem(null)} className="p-2 text-[var(--color-text-soft)]">
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
               {isGeneratingListing && (
-                <div className="py-8 text-center space-y-2">
-                  <Loader2 className="w-6 h-6 animate-spin mx-auto text-[var(--color-primary)]" />
-                  <p className="text-base text-[var(--color-text-soft)]">Formulerar annonser...</p>
+                <div className="py-12 text-center space-y-3">
+                  <Loader2 className="w-8 h-8 animate-spin mx-auto text-[var(--color-primary)]" />
+                  <p className="text-base font-bold text-[var(--color-text)]">AI formulerar säljande annonstext...</p>
+                  <span className="text-xs text-[var(--color-text-soft)]">Analyserar skick, märke och optimerar priser.</span>
                 </div>
               )}
 
               {!isGeneratingListing && listingData && (
-                <div className="space-y-3 text-base">
-                  <div className="flex bg-[var(--color-bg)] p-1 rounded-xl">
+                <div className="space-y-4 text-base">
+                  
+                  <div className="grid grid-cols-3 gap-1.5 bg-[var(--color-bg)] p-1 rounded-2xl border border-[var(--color-border)]">
                     <button
+                      type="button"
                       onClick={() => setActiveListingTab("blocket")}
-                      className={`flex-1 py-1.5 rounded-lg font-bold text-sm ${activeListingTab === "blocket" ? "bg-[var(--color-surface)] shadow-xs" : "opacity-60"}`}
+                      className={`py-2 px-1 rounded-xl font-bold text-xs flex flex-col items-center gap-0.5 transition ${
+                        activeListingTab === "blocket" 
+                          ? "bg-[var(--color-surface)] text-rose-600 shadow-xs border border-[var(--color-border)]" 
+                          : "text-[var(--color-text-soft)] opacity-70"
+                      }`}
                     >
-                      Blocket
+                      <span className="font-black text-sm">Blocket</span>
+                      <span className="text-[10px] font-medium">Populärast</span>
                     </button>
+
                     <button
-                      onClick={() => setActiveListingTab("tradera")}
-                      className={`flex-1 py-1.5 rounded-lg font-bold text-sm ${activeListingTab === "tradera" ? "bg-[var(--color-surface)] shadow-xs" : "opacity-60"}`}
+                      type="button"
+                      onClick={() => setActiveListingTab("marketplace")}
+                      className={`py-2 px-1 rounded-xl font-bold text-xs flex flex-col items-center gap-0.5 transition ${
+                        activeListingTab === "marketplace" 
+                          ? "bg-[var(--color-surface)] text-blue-600 shadow-xs border border-[var(--color-border)]" 
+                          : "text-[var(--color-text-soft)] opacity-70"
+                      }`}
                     >
-                      Tradera
+                      <span className="font-black text-sm">Marketplace</span>
+                      <span className="text-[10px] font-medium">Lokalt & snabbt</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveListingTab("tradera")}
+                      className={`py-2 px-1 rounded-xl font-bold text-xs flex flex-col items-center gap-0.5 transition ${
+                        activeListingTab === "tradera" 
+                          ? "bg-[var(--color-surface)] text-amber-600 shadow-xs border border-[var(--color-border)]" 
+                          : "text-[var(--color-text-soft)] opacity-70"
+                      }`}
+                    >
+                      <span className="font-black text-sm">Tradera</span>
+                      <span className="text-[10px] font-medium">Auktion</span>
                     </button>
                   </div>
 
-                  <div>
-                    <span className="text-xs text-[var(--color-text-soft)] block font-semibold">Pris</span>
-                    <b className="text-lg text-[var(--color-text)]">
-                      {activeListingTab === "blocket" ? `${listingData.suggested_price_sek} kr` : `Startbud ${listingData.tradera_start_bid_sek} kr`}
-                    </b>
+                  <div className="bg-[var(--color-surface)] p-3.5 rounded-2xl border border-[var(--color-border)] flex items-center justify-between">
+                    <div>
+                      <span className="text-xs text-[var(--color-text-soft)] block font-semibold">
+                        {activeListingTab === "tradera" ? "Föreslaget startbud" : "Rekommenderat säljpris"}
+                      </span>
+                      <b className="text-2xl font-black text-[var(--color-text)]">
+                        {activeListingTab === "tradera" 
+                          ? `${listingData.tradera_start_bid_sek || 49} kr` 
+                          : `${listingData.suggested_price_sek || listingModalItem.market_value_sek} kr`}
+                      </b>
+                    </div>
+                    <span className="text-xs font-bold px-3 py-1.5 rounded-xl bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
+                      Baserat på skick: {listingModalItem.condition}
+                    </span>
                   </div>
 
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-sm font-semibold">
-                      <span>Rubrik</span>
-                      <button 
-                        onClick={() => copyToClipboard(activeListingTab === "blocket" ? listingData.blocket_title : listingData.tradera_title, "titel")} 
-                        className="text-[var(--color-primary)] font-bold"
-                      >
-                        {copiedText === "titel" ? "Kopierad!" : "Kopiera"}
-                      </button>
-                    </div>
-                    <div className="p-3 rounded-xl bg-[var(--color-bg)] font-medium text-sm">
-                      {activeListingTab === "blocket" ? listingData.blocket_title : listingData.tradera_title}
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => handleLaunchPlatform(activeListingTab)}
+                      className="min-h-[58px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-extrabold text-[17px] flex items-center justify-center gap-2.5 shadow-md active:scale-[.98] transition"
+                    >
+                      <span>
+                        {activeListingTab === "blocket" && "🚀 Skapa annons på Blocket"}
+                        {activeListingTab === "marketplace" && "👥 Skapa på Facebook Marketplace"}
+                        {activeListingTab === "tradera" && "🔨 Skapa annons på Tradera"}
+                      </span>
+                    </button>
+
+                    <div className="p-3 bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] text-xs text-[var(--color-text-soft)] space-y-1">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                        <span>Den utskurna närbilden sparas i telefonens album</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                        <span>Komplett annonstext kopieras till urklipp</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                        <span>
+                          {activeListingTab === "blocket" && "Blocket öppnas – välj Torget och klistra in!"}
+                          {activeListingTab === "marketplace" && "Marketplace öppnas direkt i pryl-läget – klistra in!"}
+                          {activeListingTab === "tradera" && "Tradera öppnas direkt i auktionsskapare – klistra in!"}
+                        </span>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-sm font-semibold">
-                      <span>Text</span>
-                      <button 
-                        onClick={() => copyToClipboard(activeListingTab === "blocket" ? listingData.blocket_body : listingData.tradera_body, "body")} 
-                        className="text-[var(--color-primary)] font-bold"
-                      >
-                        {copiedText === "body" ? "Kopierad!" : "Kopiera"}
-                      </button>
+                  <div className="pt-2 border-t border-[var(--color-border)] space-y-3">
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center text-xs font-semibold text-[var(--color-text-soft)]">
+                        <span>Rubrik</span>
+                        <button 
+                          onClick={() => copyToClipboard(activeListingTab === "tradera" ? listingData.tradera_title : listingData.blocket_title, "titel")} 
+                          className="text-[var(--color-primary)] font-bold hover:underline"
+                        >
+                          {copiedText === "titel" ? "Kopierad!" : "Kopiera rubrik"}
+                        </button>
+                      </div>
+                      <div className="p-3 rounded-xl bg-[var(--color-bg)] font-semibold text-sm border border-[var(--color-border)]">
+                        {activeListingTab === "tradera" ? listingData.tradera_title : listingData.blocket_title}
+                      </div>
                     </div>
-                    <div className="p-3 rounded-xl bg-[var(--color-bg)] font-medium text-sm max-h-40 overflow-y-auto whitespace-pre-line">
-                      {activeListingTab === "blocket" ? listingData.blocket_body : listingData.tradera_body}
+
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center text-xs font-semibold text-[var(--color-text-soft)]">
+                        <span>Beskrivning</span>
+                        <button 
+                          onClick={() => copyToClipboard(activeListingTab === "tradera" ? listingData.tradera_body : listingData.blocket_body, "body")} 
+                          className="text-[var(--color-primary)] font-bold hover:underline"
+                        >
+                          {copiedText === "body" ? "Kopierad!" : "Kopiera text"}
+                        </button>
+                      </div>
+                      <div className="p-3 rounded-xl bg-[var(--color-bg)] font-medium text-xs max-h-36 overflow-y-auto whitespace-pre-line border border-[var(--color-border)] leading-relaxed text-[var(--color-text)]">
+                        {activeListingTab === "tradera" ? listingData.tradera_body : listingData.blocket_body}
+                      </div>
                     </div>
                   </div>
+
                 </div>
               )}
+
             </div>
           </div>
         )}
 
-        {/* SKADEANMÄLAN MODAL */}
         {showIncidentModal && (
           <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
             <div className="bg-[var(--color-surface)] rounded-3xl p-5 w-full max-w-sm border border-[var(--color-border)] space-y-4 max-h-[90vh] overflow-y-auto">
@@ -3459,7 +3554,6 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* MANUELL REGISTRERING */}
         {showManualModal && (
           <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
             <div className="bg-[var(--color-surface)] rounded-3xl p-5 w-full max-w-sm border border-[var(--color-border)] space-y-3">
@@ -3519,7 +3613,6 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* BOSTADS-MODAL */}
         {showPropertyModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in overflow-y-auto">
             <div className="bg-[var(--color-surface)] rounded-3xl p-5 w-full max-w-sm shadow-2xl border border-[var(--color-border)] space-y-4 my-8 max-h-[90vh] overflow-y-auto">
@@ -3577,7 +3670,7 @@ export default function HomePage() {
                       setPropertyFormData({
                         name: "Sommarstugan",
                         property_type: "Fritidshus",
-                        insurance_company: "Länsförsäkringar",
+                        insurance_company: "Länsförsarskringar",
                         coverage_limit_sek: 600000,
                         deductible_sek: 1500,
                         living_area_sqm: 55,
@@ -3705,7 +3798,6 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* AUTH MODAL */}
         {showAuthModal && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
             <div className="bg-[var(--color-surface)] rounded-3xl p-6 w-full max-w-sm border border-[var(--color-border)] space-y-4 shadow-xl">
