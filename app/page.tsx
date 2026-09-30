@@ -85,6 +85,16 @@ const INCIDENT_TYPES = [
   { label: "Allrisk / Drulle", icon: AlertTriangle },
 ];
 
+// Lugna, korta statusmeddelanden under analys
+const SCAN_MESSAGES = [
+  "Letar efter prylar i bilden...",
+  "Känner igen modeller och skick...",
+  "Hämtar aktuella marknadsvärden...",
+  "Förbereder dina markeringar...",
+];
+
+const SCAN_ICONS = ["🛋️", "📺", "☕", "🎸", "🪴", "🚲", "⌚", "💻"];
+
 interface Property {
   id: string;
   name: string;
@@ -211,7 +221,7 @@ function requiresManualOrCare(item: VaultItem): boolean {
   return applianceKeywords.some((word) => text.includes(word));
 }
 
-// Auto-crop funktion som klipper ut en skarp närbild baserat på Gemini box_2d koordinater
+// Auto-crop: Klipper ut en skarp närbild baserat på box_2d
 async function cropImageFromBox(
   imageSrc: string,
   box: [number, number, number, number],
@@ -306,7 +316,12 @@ export default function HomePage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Analysresultat (Enskild eller Flerobjekt med Point-and-Pick)
+  // Mjuk UX-övergång under skanning
+  const [scanMessageIndex, setScanMessageIndex] = useState(0);
+  const [isTextFading, setIsTextFading] = useState(false);
+  const [scanIconIndex, setScanIconIndex] = useState(0);
+
+  // Analysresultat
   const [result, setResult] = useState<ItemAnalysisResult | null>(null);
   const [multiResults, setMultiResults] = useState<ItemAnalysisResult[]>([]);
   const [selectedMultiIndices, setSelectedMultiIndices] = useState<number[]>([]);
@@ -375,6 +390,28 @@ export default function HomePage() {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3000);
   };
+
+  // Mjuk och harmonisk textövergång under skanning (3,2 sekunder)
+  useEffect(() => {
+    if (!isAnalyzing) return;
+
+    const msgInterval = setInterval(() => {
+      setIsTextFading(true);
+      setTimeout(() => {
+        setScanMessageIndex((prev) => (prev + 1) % SCAN_MESSAGES.length);
+        setIsTextFading(false);
+      }, 350);
+    }, 3200);
+
+    const iconInterval = setInterval(() => {
+      setScanIconIndex((prev) => (prev + 1) % SCAN_ICONS.length);
+    }, 1200);
+
+    return () => {
+      clearInterval(msgInterval);
+      clearInterval(iconInterval);
+    };
+  }, [isAnalyzing]);
 
   useEffect(() => {
     setIsOnline(navigator.onLine);
@@ -936,7 +973,7 @@ export default function HomePage() {
     setTimeout(() => setCopiedText(null), 2500);
   };
 
-  // Bildanalys med Point-and-Pick & Smart auto-val
+  // Bildanalys
   const handleImageSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -953,6 +990,9 @@ export default function HomePage() {
     }
 
     setIsAnalyzing(true);
+    setScanMessageIndex(0);
+    setIsTextFading(false);
+    setScanIconIndex(0);
 
     try {
       const processed = await sanitizeAndCompressImage(file);
@@ -987,12 +1027,10 @@ export default function HomePage() {
         const detected: ItemAnalysisResult[] = response.items;
         
         if (detected.length === 1) {
-          // 1 tydlig pryl: Välj automatiskt direkt! Noll extra klick krävs.
           setResult(detected[0]);
           setMultiResults([]);
           setSelectedMultiIndices([0]);
         } else if (detected.length > 1) {
-          // Flera prylar: Tänd upp koordinat- och point-and-pick-vyn
           setMultiResults(detected);
           setSelectedMultiIndices(detected.map((_, idx) => idx));
           showToast(`Upptäckte ${detected.length} prylar på bilden!`);
@@ -1027,7 +1065,7 @@ export default function HomePage() {
     );
   };
 
-  // Spara ett enskilt föremål
+  // Spara en enskild pryl
   const executeSaveAiItem = async (userId: string) => {
     if (!result || !base64ForSave) return;
     setIsSaving(true);
@@ -1127,7 +1165,7 @@ export default function HomePage() {
 
     setIsSaving(true);
     try {
-      // 1. Spara originalöversikten en gång (Kontextbild för alla prylar i batchen)
+      // 1. Spara originalöversikten en gång
       const byteCharacters = atob(base64ForSave);
       const byteNumbers = new Array(byteCharacters.length);
       for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
@@ -1546,22 +1584,47 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* AI-SKANNING PÅGÅR */}
+          {/* AI-SKANNING PÅGÅR: REN, LUGN OCH HARMONISK UX */}
           {isAnalyzing && (
-            <div className="py-20 text-center space-y-4 animate-in fade-in">
-              <div className="relative w-48 h-48 mx-auto rounded-3xl overflow-hidden bg-[var(--color-surface)] border border-[var(--color-border)] shadow-md flex items-center justify-center">
-                {previewUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={previewUrl} alt="Skannas" className="w-full h-full object-cover" />
-                ) : (
-                  <Camera className="w-16 h-16 text-[var(--color-primary)] opacity-40 animate-pulse" />
-                )}
-                <div className="absolute inset-x-0 h-1 bg-[var(--color-primary)] animate-pulse top-1/2" />
+            <div className="py-16 text-center space-y-7 animate-in fade-in select-none">
+              
+              {/* Fotobehållare med mjuk glöd och svepande scannerlinje */}
+              <div className="relative w-52 h-52 mx-auto">
+                <div className="absolute -inset-2 bg-gradient-to-tr from-[var(--color-primary)] via-emerald-400 to-amber-300 rounded-[34px] opacity-35 blur-md animate-pulse" />
+
+                <div className="relative w-full h-full rounded-3xl overflow-hidden bg-stone-900 border-2 border-[var(--color-primary)] shadow-2xl flex items-center justify-center">
+                  {previewUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img 
+                      src={previewUrl} 
+                      alt="Skannas" 
+                      className="w-full h-full object-cover opacity-90 scale-105" 
+                    />
+                  ) : (
+                    <Camera className="w-16 h-16 text-[var(--color-primary)] opacity-40 animate-pulse" />
+                  )}
+
+                  {/* Lugn vertikal scannerlinje */}
+                  <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-[var(--color-primary)] to-transparent shadow-[0_0_12px_#2dd4bf] animate-[bounce_2.5s_infinite]" />
+                </div>
+
+                {/* Diskret roterande pryl-badge */}
+                <div className="absolute -bottom-2.5 -right-2.5 w-12 h-12 rounded-2xl bg-[var(--color-surface)] border-2 border-[var(--color-primary)] shadow-lg flex items-center justify-center text-2xl transition-all duration-300">
+                  <span>{SCAN_ICONS[scanIconIndex]}</span>
+                </div>
               </div>
-              <h2 className="text-xl font-bold text-[var(--color-text)]">Söker och identifierar prylar…</h2>
-              <p className="text-[16px] text-[var(--color-text-soft)]">
-                Placerar ut markörer över föremål vi hittar i bilden.
-              </p>
+
+              {/* Lugn textrad med mjuk fade-övergång */}
+              <div className="px-6 max-w-xs mx-auto min-h-[48px] flex items-center justify-center">
+                <h2 
+                  className={`text-[19px] font-extrabold text-[var(--color-text)] transition-opacity duration-300 ${
+                    isTextFading ? "opacity-0" : "opacity-100"
+                  }`}
+                >
+                  {SCAN_MESSAGES[scanMessageIndex]}
+                </h2>
+              </div>
+
             </div>
           )}
 
@@ -1707,7 +1770,7 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* ENSKILT AI-RESULTATKORT (1 pryl hittades = automatiskt vald!) */}
+          {/* ENSKILT AI-RESULTATKORT */}
           {result && !isAnalyzing && multiResults.length === 0 && (
             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-200">
               <button 
@@ -1727,7 +1790,6 @@ export default function HomePage() {
                   <img src={previewUrl} alt={result.title} className="w-full h-full object-cover" />
                 )}
 
-                {/* Subtil markör på det enskilda föremålet */}
                 {result.box_2d && result.box_2d.length >= 4 && (
                   <div 
                     style={{
