@@ -1,153 +1,103 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 
 export async function POST(req: NextRequest) {
   try {
+    const { base64Image, mimeType } = await req.json();
+
+    if (!base64Image) {
+      return NextResponse.json({ error: "Ingen bild tillhandahölls" }, { status: 400 });
+    }
+
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      return NextResponse.json(
-        { success: false, error: "GEMINI_API_KEY saknas i .env.local" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "GEMINI_API_KEY saknas i miljövariabler" }, { status: 500 });
     }
-
-    const { base64Image, mimeType } = await req.json();
-    if (!base64Image) {
-      return NextResponse.json(
-        { success: false, error: "Ingen bilddata togs emot" },
-        { status: 400 }
-      );
-    }
-
-    const genAI = new GoogleGenerativeAI(apiKey);
-
-    const responseSchema = {
-      type: SchemaType.OBJECT,
-      properties: {
-        title: { 
-          type: SchemaType.STRING, 
-          description: "Kortfattat svenskt namn på föremålet, t.ex. 'Husqvarna Lavatherm torktumlare'" 
-        },
-        category: { 
-          type: SchemaType.STRING, 
-          enum: [
-            "Vitvaror & Hushåll",
-            "Hemelektronik & TV",
-            "Datorer & Telefoner",
-            "Smycken & Klockor",
-            "Möbler & Inredning",
-            "Konst & Samlarobjekt",
-            "Verktyg & Trädgård",
-            "Kläder, Skor & Väskor",
-            "Sport & Fritid",
-            "Övrigt"
-          ] 
-        },
-        brand: { type: SchemaType.STRING, description: "Märke/Tillverkare" },
-        model: { type: SchemaType.STRING, description: "Modellserie eller specifik beteckning" },
-        estimated_replacement_cost_sek: { 
-          type: SchemaType.NUMBER, 
-          description: "Uppskattat nypris i SEK idag för motsvarande produkt" 
-        },
-        market_value_sek: { 
-          type: SchemaType.NUMBER, 
-          description: "Uppskattat begagnatvärde i SEK i nuvarande skick" 
-        },
-        condition: { 
-          type: SchemaType.STRING, 
-          enum: ["Nyskick", "Mycket gott", "Gott", "Slitage", "Defekt"] 
-        },
-        serial_number_hint: { 
-          type: SchemaType.STRING, 
-          description: "Var serienumret eller typskylten vanligen sitter" 
-        },
-        confidence: { 
-          type: SchemaType.NUMBER, 
-          description: "Sannolikhetspoäng mellan 0.0 och 1.0" 
-        }
-      },
-      required: [
-        "title", 
-        "category", 
-        "brand", 
-        "model", 
-        "estimated_replacement_cost_sek", 
-        "market_value_sek", 
-        "condition", 
-        "serial_number_hint", 
-        "confidence"
-      ]
-    };
 
     const prompt = `
-Du är en auktoriserad besiktningsman och värderingsexpert för svenska försäkringsbolag.
-Analysera föremålet på bilden noggrant:
-1. Identifiera fabrikat och modell. Om det finns flera föremål, fokusera på det mest framträdande huvudföremålet.
-2. Ange realistiska marknadspriser i Svenska Kronor (SEK).
-3. Var konservativ i värderingen men realistisk.
-4. Ange var typskylt/serienummer vanligen sitter på denna typ av produkt.
-Svara uteslutande med det definierade JSON-schemat.
+Du är en expert på heminventering, värdering och bildanalys.
+Analysera den bifogade bilden och identifiera värdefulla föremål.
+
+UPPGIFT:
+1. Identifiera alla framträdande och värdefulla föremål i bilden (max 6 st).
+   - Om bilden tydligt visar ETT enskilt föremål (t.ex. en närbild på en kaffebryggare, stol, TV eller cykel), returnera en lista med bara det föremålet.
+   - Om bilden visar FLERA distinkta föremål (t.ex. en köksbänk, hylla, verktygsvägg), identifiera varje separat pryl. Ignorera oväsentligt skräp och sladdar.
+
+2. För VARJE identifierat föremål måste du ange:
+   - box_2d: Bounding box som [ymin, xmin, ymax, xmax] normaliserat till heltal mellan 0 och 1000.
+   - title: Koncis svensk benämning (t.ex. "Moccamaster Kaffebryggare", "Bosch Borrmaskin").
+   - category: Kategori (t.ex. Vitvaror, Elektronik, Verktyg, Möbler, Ljud & Bild).
+   - brand: Tillverkare om synligt/härledbart, annars tomt.
+   - model: Modellbeteckning om synligt, annars tomt.
+   - estimated_replacement_cost_sek: Uppskattat nypris i SEK idag.
+   - market_value_sek: Uppskattat begagnatvärde i SEK baserat på skick.
+   - condition: Ett av: "Nyskick", "Mycket gott", "Gott", "Slitage", "Defekt".
+   - serial_number_hint: Tips om var typskylt/serienummer brukar sitta.
+   - confidence: Tal mellan 0.50 och 0.99.
+
+Returnera ENDAST giltig JSON i exakt detta format:
+{
+  "items": [
+    {
+      "box_2d": [320, 150, 780, 520],
+      "title": "Moccamaster KBG962",
+      "category": "Vitvaror & Hushåll",
+      "brand": "Moccamaster",
+      "model": "KBG962",
+      "estimated_replacement_cost_sek": 2790,
+      "market_value_sek": 1400,
+      "condition": "Mycket gott",
+      "serial_number_hint": "Undersidan av maskinen",
+      "confidence": 0.95
+    }
+  ]
+}
 `;
 
-    const model = genAI.getGenerativeModel({
-      model: "gemini-3.8-flash",
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: responseSchema as any,
-      },
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+
+    const response = await fetch(geminiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              { text: prompt },
+              {
+                inline_data: {
+                  mime_type: mimeType || "image/jpeg",
+                  data: base64Image,
+                },
+              },
+            ],
+          },
+        ],
+        generationConfig: {
+          response_mime_type: "application/json",
+          temperature: 0.1,
+        },
+      }),
     });
 
-    const maxRetries = 3;
-    let parsedData: any = null;
-    let lastError: any = null;
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        console.log(`Försöker anropa gemini-3.8-flash (försök ${attempt}/${maxRetries})...`);
-        const result = await model.generateContent([
-          prompt,
-          {
-            inlineData: {
-              data: base64Image,
-              mimeType: mimeType || "image/jpeg",
-            },
-          },
-        ]);
-
-        const textResponse = result.response.text();
-        parsedData = JSON.parse(textResponse);
-        if (parsedData) break;
-      } catch (err: any) {
-        lastError = err;
-        const errMsg = err?.message || String(err);
-        const isTemporary = errMsg.includes("503") || errMsg.includes("high demand") || errMsg.includes("ResourceExhausted") || err?.status === 503;
-
-        console.warn(`Försök ${attempt} misslyckades:`, errMsg.substring(0, 120));
-
-        if (isTemporary && attempt < maxRetries) {
-          // Vänta längre för varje försök (2s, 4s)
-          const waitMs = attempt * 2000;
-          console.log(`Väntar ${waitMs}ms innan nytt försök på grund av kö hos Google...`);
-          await new Promise((resolve) => setTimeout(resolve, waitMs));
-        } else if (!isTemporary) {
-          // Om felet inte är körelaterat (t.ex. ogiltig API-nyckel), avbryt direkt
-          break;
-        }
-      }
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error("Gemini API Error:", errText);
+      return NextResponse.json({ error: "Kunde inte analysera bilden hos AI-tjänsten." }, { status: 502 });
     }
 
-    if (!parsedData) {
-      const errorText = lastError?.message?.includes("503")
-        ? "Googles gratisservrar har tillfälligt hög efterfrågan. Vänta 5-10 sekunder och tryck på 'Försök igen'."
-        : (lastError?.message || "Kunde inte tolka bilden.");
-      return NextResponse.json({ success: false, error: errorText }, { status: 503 });
+    const rawData = await response.json();
+    const candidateText = rawData?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (!candidateText) {
+      return NextResponse.json({ error: "Inget giltigt svar från AI-modellen." }, { status: 502 });
     }
 
-    return NextResponse.json({ success: true, data: parsedData });
-  } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : "Okänt serverfel";
-    console.error("Fel vid bildanalys:", errorMsg);
-    return NextResponse.json({ success: false, error: errorMsg }, { status: 500 });
+    const parsed = JSON.parse(candidateText);
+    const items = Array.isArray(parsed.items) ? parsed.items : [parsed];
+
+    return NextResponse.json({ success: true, items });
+  } catch (err: any) {
+    console.error("Analyze Route Error:", err);
+    return NextResponse.json({ error: err.message || "Internt serverfel" }, { status: 500 });
   }
 }
