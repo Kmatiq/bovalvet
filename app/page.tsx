@@ -372,6 +372,7 @@ export default function HomePage() {
   const [authPassword, setAuthPassword] = useState("");
   const [authIsSignUp, setAuthIsSignUp] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
+  const [socialLoading, setSocialLoading] = useState<"google" | "facebook" | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -477,6 +478,55 @@ export default function HomePage() {
     showToast("Synkning klar ✓");
   };
 
+  const processPendingGuestData = async (userId: string) => {
+    const pendingJson = localStorage.getItem("prylkoll_pending_guest_item");
+    if (!pendingJson) return;
+
+    try {
+      const pending = JSON.parse(pendingJson);
+      localStorage.removeItem("prylkoll_pending_guest_item");
+
+      showToast("Sparar din bild till ditt nya konto...");
+
+      if (pending.base64ForSave && pending.result) {
+        const byteCharacters = atob(pending.base64ForSave);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: "image/jpeg" });
+        const fileName = `${userId}/${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`;
+
+        await supabase.storage.from("item-photos").upload(fileName, blob, { contentType: "image/jpeg", upsert: true });
+
+        const { data: insertedData, error: insertErr } = await supabase.from("items").insert({
+          user_id: userId,
+          property_id: selectedProperty?.id || null,
+          title: pending.result.title,
+          category: pending.result.category,
+          room: pending.room || "Vardagsrum",
+          brand: pending.result.brand,
+          model: pending.result.model,
+          estimated_replacement_cost_sek: pending.result.estimated_replacement_cost_sek,
+          market_value_sek: pending.result.market_value_sek,
+          condition: pending.result.condition,
+          serial_number_hint: pending.result.serial_number_hint,
+          image_path: fileName,
+          photo_path: fileName,
+          image_paths: [fileName],
+          is_archived: false
+        }).select().single();
+
+        if (!insertErr && insertedData) {
+          await fetchVaultStats(userId, selectedProperty?.id);
+          await fetchVaultItems(userId, selectedProperty?.id);
+          showToast(`"${pending.result.title}" har sparats i ditt valv ✓`);
+        }
+      }
+    } catch (e) {
+      console.error("Kunde inte synka gästdata:", e);
+    }
+  };
+
   useEffect(() => {
     const initSession = async () => {
       const { data } = await supabase.auth.getSession();
@@ -487,6 +537,7 @@ export default function HomePage() {
         setDisplayName(storedName);
         setDisplayNameInput(storedName);
         fetchProperties(user.id);
+        processPendingGuestData(user.id);
       }
     };
     initSession();
@@ -499,6 +550,7 @@ export default function HomePage() {
         setDisplayName(storedName);
         setDisplayNameInput(storedName);
         fetchProperties(user.id);
+        processPendingGuestData(user.id);
       } else {
         setDisplayName("");
         setDisplayNameInput("");
@@ -969,7 +1021,6 @@ export default function HomePage() {
     setTimeout(() => setCopiedText(null), 2500);
   };
 
-  // Direktstart: Laddar ner bild, kopierar text & öppnar respektive marknadsplats
   const handleLaunchPlatform = async (platform: "blocket" | "marketplace" | "tradera") => {
     if (!listingModalItem || !listingData) return;
 
@@ -984,21 +1035,17 @@ export default function HomePage() {
       destinationUrl = "https://www.facebook.com/marketplace/create/item";
     } else {
       textToCopy = `${listingData.tradera_title || listingModalItem.title}\n\nStartbud: ${listingData.tradera_start_bid_sek || 49} kr\nSkick: ${listingModalItem.condition}\n\n${listingData.tradera_body || ""}`;
-      // Traderas stabila ingång för att starta nytt utkast
       destinationUrl = "https://www.tradera.com/selling/new";
     }
 
-    // Öppna direkt i klickhändelsen för att kringgå popup-blockerare i iOS Safari
     window.open(destinationUrl, "_blank", "noopener,noreferrer");
 
-    // Kopiera texten till urklipp
     try {
       await navigator.clipboard.writeText(textToCopy);
     } catch (e) {
       console.error("Urklipp misslyckades:", e);
     }
 
-    // Ladda ner den utskurna bilden så att den hamnar överst i telefonens album
     if (listingModalItem.imageUrl) {
       try {
         const res = await fetch(listingModalItem.imageUrl);
@@ -1113,35 +1160,22 @@ export default function HomePage() {
 
   const executeSaveAiItem = async (userId: string) => {
     if (!result || !base64ForSave) return;
+
+    if (!userId) {
+      const guestData = {
+        result,
+        base64ForSave,
+        room: activeRoom,
+      };
+      localStorage.setItem("prylkoll_pending_guest_item", JSON.stringify(guestData));
+      setShowAuthModal(true);
+      showToast("Logga in för att spara din pryl i valvet!");
+      return;
+    }
+
     setIsSaving(true);
 
     try {
-      if (!navigator.onLine) {
-        const offlineItem = {
-          id: `offline-${Date.now()}`,
-          user_id: userId,
-          title: result.title,
-          category: result.category,
-          room: activeRoom,
-          brand: result.brand,
-          model: result.model,
-          estimated_replacement_cost_sek: result.estimated_replacement_cost_sek,
-          market_value_sek: result.market_value_sek,
-          condition: result.condition,
-          created_at: new Date().toISOString()
-        };
-        const currentQueue = JSON.parse(localStorage.getItem("prylkoll_offline_queue") || "[]");
-        localStorage.setItem("prylkoll_offline_queue", JSON.stringify([...currentQueue, offlineItem]));
-        setOfflineQueue([...currentQueue, offlineItem]);
-
-        setResult(null);
-        setPreviewUrl(null);
-        setBase64ForSave(null);
-        setIsSaving(false);
-        showToast("Sparad i offline-kö! Synkas när du får nät.");
-        return;
-      }
-
       const byteCharacters = atob(base64ForSave);
       const byteNumbers = new Array(byteCharacters.length);
       for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
@@ -1201,6 +1235,12 @@ export default function HomePage() {
   const executeSaveMultiItems = async (userId: string) => {
     const itemsToSave = multiResults.filter((_, idx) => selectedMultiIndices.includes(idx));
     if (itemsToSave.length === 0 || !base64ForSave || !previewUrl) return;
+
+    if (!userId) {
+      setShowAuthModal(true);
+      showToast("Logga in för att spara dina prylar!");
+      return;
+    }
 
     if (!isPro && activeVaultItems.length + itemsToSave.length > FREE_ITEM_LIMIT) {
       setShowProModal(true);
@@ -1366,6 +1406,23 @@ export default function HomePage() {
     }
   };
 
+  const handleSocialLogin = async (provider: "google" | "facebook") => {
+    setSocialLoading(provider);
+    setAuthError(null);
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
+        },
+      });
+      if (error) throw error;
+    } catch (err: any) {
+      setAuthError(`Kunde inte logga in med ${provider === "google" ? "Google" : "Facebook"}: ${err.message}`);
+      setSocialLoading(null);
+    }
+  };
+
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthLoading(true);
@@ -1405,8 +1462,7 @@ export default function HomePage() {
         setShowAuthModal(false);
         await new Promise((r) => setTimeout(r, 300));
         await fetchProperties(activeUser.id);
-        if (result) executeSaveAiItem(activeUser.id);
-        if (multiResults.length > 0) executeSaveMultiItems(activeUser.id);
+        await processPendingGuestData(activeUser.id);
       }
     } catch (err: any) {
       setAuthError(err.message || "Kunde inte logga in.");
@@ -1536,13 +1592,17 @@ export default function HomePage() {
               )}
               <button
                 onClick={() => {
-                  setDisplayNameInput(displayName);
-                  setShowProfileModal(true);
+                  if (!sessionUser) {
+                    setShowAuthModal(true);
+                  } else {
+                    setDisplayNameInput(displayName);
+                    setShowProfileModal(true);
+                  }
                 }}
                 className="w-11 h-11 rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)] flex items-center justify-center font-bold text-base border-0 hover:opacity-90 active:scale-95 transition"
-                aria-label="Profil och inställningar"
+                aria-label="Profil och inloggning"
               >
-                {avatarLetter}
+                {sessionUser ? avatarLetter : <Lock className="w-4 h-4" />}
               </button>
             </div>
           </header>
@@ -1765,10 +1825,7 @@ export default function HomePage() {
               <div className="pt-2 space-y-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    if (!sessionUser) setShowAuthModal(true);
-                    else executeSaveMultiItems(sessionUser.id);
-                  }}
+                  onClick={() => executeSaveMultiItems(sessionUser?.id)}
                   disabled={isSaving || selectedMultiIndices.length === 0}
                   className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98] disabled:opacity-50"
                 >
@@ -1778,7 +1835,9 @@ export default function HomePage() {
                     <span>
                       {selectedMultiIndices.length === 0 
                         ? "Välj minst en pryl att spara" 
-                        : `Spara ${selectedMultiIndices.length} ${selectedMultiIndices.length === 1 ? "vald pryl" : "valda prylar"} i ${activeRoom}`}
+                        : sessionUser 
+                          ? `Spara ${selectedMultiIndices.length} prylar i ${activeRoom}` 
+                          : "Logga in för att spara dina prylar"}
                     </span>
                   )}
                 </button>
@@ -1870,14 +1929,15 @@ export default function HomePage() {
               <div className="pt-2 space-y-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    if (!sessionUser) setShowAuthModal(true);
-                    else executeSaveAiItem(sessionUser.id);
-                  }}
+                  onClick={() => executeSaveAiItem(sessionUser?.id)}
                   disabled={isSaving}
                   className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98]"
                 >
-                  {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <span>Spara i {activeRoom}</span>}
+                  {isSaving ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <span>{sessionUser ? `Spara i ${activeRoom}` : "Logga in och spara pryl"}</span>
+                  )}
                 </button>
                 <button
                   type="button"
@@ -1894,10 +1954,10 @@ export default function HomePage() {
             <div className="space-y-6 animate-in fade-in">
               <div>
                 <h1 className="text-[26px] font-extrabold text-[var(--color-text)]">
-                  Hej, {displayName || "där"}!
+                  Hej, {displayName || (sessionUser ? "där" : "gäst")}!
                 </h1>
                 <p className="text-[16px] text-[var(--color-text-soft)] mt-0.5">
-                  Du har {formatItemsCount(activeVaultItems.length)}
+                  {sessionUser ? formatItemsCount(activeVaultItems.length) : "Skapa ett konto för att säkra ditt hem"}
                 </p>
               </div>
 
@@ -3288,7 +3348,6 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* SÄLJANNONS MODAL (BLOCKET, MARKETPLACE & TRADERA) */}
         {listingModalItem && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
             <div className="bg-[var(--color-surface)] rounded-t-[32px] sm:rounded-3xl p-5 w-full max-w-[440px] border border-[var(--color-border)] space-y-4 max-h-[90vh] overflow-y-auto shadow-2xl animate-in slide-in-from-bottom">
@@ -3670,7 +3729,7 @@ export default function HomePage() {
                       setPropertyFormData({
                         name: "Sommarstugan",
                         property_type: "Fritidshus",
-                        insurance_company: "Länsförsarskringar",
+                        insurance_company: "Länsförsäkringar",
                         coverage_limit_sek: 600000,
                         deductible_sek: 1500,
                         living_area_sqm: 55,
@@ -3819,6 +3878,50 @@ export default function HomePage() {
                 </div>
               )}
 
+              {/* Social Login-knappar med loggor och laddningsindikator */}
+              <div className="space-y-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => handleSocialLogin("google")}
+                  disabled={Boolean(socialLoading) || authLoading}
+                  className="min-h-[46px] w-full rounded-xl bg-white text-stone-800 font-bold text-sm border border-[var(--color-border)] flex items-center justify-center gap-2.5 shadow-2xs hover:bg-stone-50 transition active:scale-[.98] disabled:opacity-50"
+                >
+                  {socialLoading === "google" ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-stone-600" />
+                  ) : (
+                    <svg className="w-4 h-4" viewBox="0 0 24 24">
+                      <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
+                      <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.36 24 12 24z"/>
+                      <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
+                      <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.36 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
+                    </svg>
+                  )}
+                  <span>Fortsätt med Google</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSocialLogin("facebook")}
+                  disabled={Boolean(socialLoading) || authLoading}
+                  className="min-h-[46px] w-full rounded-xl bg-[#1877F2] text-white font-bold text-sm flex items-center justify-center gap-2.5 shadow-2xs hover:bg-[#166fe5] transition active:scale-[.98] disabled:opacity-50"
+                >
+                  {socialLoading === "facebook" ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                  ) : (
+                    <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                      <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                    </svg>
+                  )}
+                  <span>Fortsätt med Facebook</span>
+                </button>
+              </div>
+
+              <div className="flex items-center gap-3 my-2 text-xs text-[var(--color-text-soft)]">
+                <div className="h-px bg-[var(--color-border)] flex-1" />
+                <span>eller med e-post</span>
+                <div className="h-px bg-[var(--color-border)] flex-1" />
+              </div>
+
               <form onSubmit={handleAuthSubmit} className="space-y-3">
                 <input
                   type="email"
@@ -3826,7 +3929,7 @@ export default function HomePage() {
                   placeholder="din.epost@exempel.se"
                   value={authEmail}
                   onChange={(e) => setAuthEmail(e.target.value)}
-                  className="w-full min-h-[48px] px-3.5 border border-[var(--color-border)] rounded-xl text-base bg-[var(--color-surface)] text-[var(--color-text)]"
+                  className="w-full min-h-[46px] px-3.5 border border-[var(--color-border)] rounded-xl text-base bg-[var(--color-surface)] text-[var(--color-text)]"
                 />
                 <input
                   type="password"
@@ -3835,14 +3938,14 @@ export default function HomePage() {
                   placeholder="Lösenord"
                   value={authPassword}
                   onChange={(e) => setAuthPassword(e.target.value)}
-                  className="w-full min-h-[48px] px-3.5 border border-[var(--color-border)] rounded-xl text-base bg-[var(--color-surface)] text-[var(--color-text)]"
+                  className="w-full min-h-[46px] px-3.5 border border-[var(--color-border)] rounded-xl text-base bg-[var(--color-surface)] text-[var(--color-text)]"
                 />
                 <button
                   type="submit"
-                  disabled={authLoading}
-                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2"
+                  disabled={authLoading || Boolean(socialLoading)}
+                  className="min-h-[50px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2"
                 >
-                  {authLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <span>{authIsSignUp ? "Skapa konto & Spara" : "Logga in"}</span>}
+                  {authLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <span>{authIsSignUp ? "Skapa konto & Spara pryl" : "Logga in"}</span>}
                 </button>
               </form>
 
