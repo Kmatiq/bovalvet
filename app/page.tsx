@@ -486,9 +486,9 @@ export default function HomePage() {
       const pending = JSON.parse(pendingJson);
       localStorage.removeItem("prylkoll_pending_guest_item");
 
-      showToast("Sparar din bild till ditt nya konto...");
+      showToast("Sparar dina fotade prylar till ditt konto...");
 
-      if (pending.base64ForSave && pending.result) {
+      if (pending.base64ForSave && (pending.result || (pending.multiResults && pending.multiResults.length > 0))) {
         const byteCharacters = atob(pending.base64ForSave);
         const byteNumbers = new Array(byteCharacters.length);
         for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
@@ -496,30 +496,60 @@ export default function HomePage() {
         const blob = new Blob([byteArray], { type: "image/jpeg" });
         const fileName = `${userId}/${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`;
 
-        await supabase.storage.from("item-photos").upload(fileName, blob, { contentType: "image/jpeg", upsert: true });
+        await supabase.storage.from("item-photos").upload(fileName, blob, { 
+          contentType: "image/jpeg", 
+          upsert: true 
+        });
 
-        const { data: insertedData, error: insertErr } = await supabase.from("items").insert({
-          user_id: userId,
-          property_id: selectedProperty?.id || null,
-          title: pending.result.title,
-          category: pending.result.category,
-          room: pending.room || "Vardagsrum",
-          brand: pending.result.brand,
-          model: pending.result.model,
-          estimated_replacement_cost_sek: pending.result.estimated_replacement_cost_sek,
-          market_value_sek: pending.result.market_value_sek,
-          condition: pending.result.condition,
-          serial_number_hint: pending.result.serial_number_hint,
-          image_path: fileName,
-          photo_path: fileName,
-          image_paths: [fileName],
-          is_archived: false
-        }).select().single();
+        if (pending.multiResults && pending.multiResults.length > 0) {
+          const inserts = pending.multiResults.map((item: any) => ({
+            user_id: userId,
+            property_id: selectedProperty?.id || null,
+            title: item.title,
+            category: item.category,
+            room: pending.room || "Vardagsrum",
+            brand: item.brand || "",
+            model: item.model || "",
+            estimated_replacement_cost_sek: Number(item.estimated_replacement_cost_sek) || 0,
+            market_value_sek: Number(item.market_value_sek) || 0,
+            condition: item.condition || "Mycket gott",
+            serial_number_hint: item.serial_number_hint || "",
+            image_path: fileName,
+            photo_path: fileName,
+            image_paths: [fileName],
+            is_archived: false
+          }));
 
-        if (!insertErr && insertedData) {
-          await fetchVaultStats(userId, selectedProperty?.id);
-          await fetchVaultItems(userId, selectedProperty?.id);
-          showToast(`"${pending.result.title}" har sparats i ditt valv ✓`);
+          const { error: insertErr } = await supabase.from("items").insert(inserts);
+          if (!insertErr) {
+            await fetchVaultStats(userId, selectedProperty?.id);
+            await fetchVaultItems(userId, selectedProperty?.id);
+            showToast(`${inserts.length} prylar har sparats i ditt valv ✓`);
+          }
+        } else if (pending.result) {
+          const { data: insertedData, error: insertErr } = await supabase.from("items").insert({
+            user_id: userId,
+            property_id: selectedProperty?.id || null,
+            title: pending.result.title,
+            category: pending.result.category,
+            room: pending.room || "Vardagsrum",
+            brand: pending.result.brand,
+            model: pending.result.model,
+            estimated_replacement_cost_sek: pending.result.estimated_replacement_cost_sek,
+            market_value_sek: pending.result.market_value_sek,
+            condition: pending.result.condition,
+            serial_number_hint: pending.result.serial_number_hint,
+            image_path: fileName,
+            photo_path: fileName,
+            image_paths: [fileName],
+            is_archived: false
+          }).select().single();
+
+          if (!insertErr && insertedData) {
+            await fetchVaultStats(userId, selectedProperty?.id);
+            await fetchVaultItems(userId, selectedProperty?.id);
+            showToast(`"${pending.result.title}" har sparats i ditt valv ✓`);
+          }
         }
       }
     } catch (e) {
@@ -536,21 +566,21 @@ export default function HomePage() {
         const storedName = user.user_metadata?.display_name || user.user_metadata?.full_name || "";
         setDisplayName(storedName);
         setDisplayNameInput(storedName);
-        fetchProperties(user.id);
-        processPendingGuestData(user.id);
+        await fetchProperties(user.id);
+        await processPendingGuestData(user.id);
       }
     };
     initSession();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
       const user = session?.user || null;
       setSessionUser(user);
       if (user) {
         const storedName = user.user_metadata?.display_name || user.user_metadata?.full_name || "";
         setDisplayName(storedName);
         setDisplayNameInput(storedName);
-        fetchProperties(user.id);
-        processPendingGuestData(user.id);
+        await fetchProperties(user.id);
+        await processPendingGuestData(user.id);
       } else {
         setDisplayName("");
         setDisplayNameInput("");
@@ -1118,6 +1148,16 @@ export default function HomePage() {
       const response = await res.json();
       if (response.success && response.items) {
         const detected: ItemAnalysisResult[] = response.items;
+
+        // Spara ALLTID omedelbart till gästminnet ifall användaren klickar på social OAuth-inloggning
+        if (!sessionUser) {
+          localStorage.setItem("prylkoll_pending_guest_item", JSON.stringify({
+            result: detected.length === 1 ? detected[0] : null,
+            multiResults: detected.length > 1 ? detected : null,
+            base64ForSave: processed.base64ForGemini,
+            room: activeRoom
+          }));
+        }
         
         if (detected.length === 1) {
           setResult(detected[0]);
@@ -1237,6 +1277,12 @@ export default function HomePage() {
     if (itemsToSave.length === 0 || !base64ForSave || !previewUrl) return;
 
     if (!userId) {
+      const guestData = {
+        multiResults: itemsToSave,
+        base64ForSave,
+        room: activeRoom,
+      };
+      localStorage.setItem("prylkoll_pending_guest_item", JSON.stringify(guestData));
       setShowAuthModal(true);
       showToast("Logga in för att spara dina prylar!");
       return;
@@ -1409,6 +1455,17 @@ export default function HomePage() {
   const handleSocialLogin = async (provider: "google" | "facebook") => {
     setSocialLoading(provider);
     setAuthError(null);
+
+    // Säkerställ att aktuell pryl och bild finns sparad i localStorage innan OAuth omdirigerar
+    if (base64ForSave && (result || multiResults.length > 0)) {
+      localStorage.setItem("prylkoll_pending_guest_item", JSON.stringify({
+        result,
+        multiResults: multiResults.length > 0 ? multiResults.filter((_, idx) => selectedMultiIndices.includes(idx)) : null,
+        base64ForSave,
+        room: activeRoom
+      }));
+    }
+
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider,
@@ -3878,7 +3935,6 @@ export default function HomePage() {
                 </div>
               )}
 
-              {/* Social Login-knappar med loggor och laddningsindikator */}
               <div className="space-y-2 pt-1">
                 <button
                   type="button"
