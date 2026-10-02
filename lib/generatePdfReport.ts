@@ -46,7 +46,7 @@ export function generateVaultPdf(items: VaultItem[], userEmail: string, totalVal
 
   doc.setFontSize(20);
   doc.setTextColor(30, 41, 59);
-  doc.text("PrylKoll - Inventarieförteckning", 14, 22);
+  doc.text("BoValvet - Inventarieförteckning", 14, 22);
 
   doc.setFontSize(9);
   doc.setTextColor(100, 116, 139);
@@ -92,7 +92,7 @@ export function generateVaultPdf(items: VaultItem[], userEmail: string, totalVal
     },
   });
 
-  doc.save(`PrylKoll-Inventarium-${new Date().toISOString().split("T")[0]}.pdf`);
+  doc.save(`BoValvet-Inventarium-${new Date().toISOString().split("T")[0]}.pdf`);
 }
 
 // 2. SKARP SKADEANMÄLAN / INCIDENTRAPPORT (PDF)
@@ -117,7 +117,7 @@ export function generateIncidentPdf(params: IncidentReportParams) {
   doc.setFontSize(8.5);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(100, 116, 139);
-  doc.text(`Rapport skapad via PrylKoll: ${new Date().toLocaleDateString("sv-SE")}`, 14, 28);
+  doc.text(`Rapport skapad via BoValvet: ${new Date().toLocaleDateString("sv-SE")}`, 14, 28);
 
   // RUTA 1: INCIDENTUPPGIFTER
   doc.setFillColor(254, 242, 242);
