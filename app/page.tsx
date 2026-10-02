@@ -20,11 +20,11 @@ import {
   FileDown, 
   Building2, 
   ChevronDown, 
-  ChevronUp,
+  ChevronUp, 
   AlertTriangle, 
   Receipt, 
-  CalendarCheck,
-  Info,
+  CalendarCheck, 
+  Info, 
   ShoppingBag, 
   Copy, 
   Check, 
@@ -33,29 +33,29 @@ import {
   Droplets, 
   Zap, 
   CheckSquare, 
-  Square,
-  Image as ImageIcon,
-  PenTool,
-  Phone,
-  ChevronRight,
-  Plus,
-  Home as HomeIcon,
-  LayoutGrid,
-  MoreHorizontal,
-  Clock,
-  Shield,
-  Users,
-  Wrench,
-  BookOpen,
-  ExternalLink,
-  Archive,
-  RotateCcw,
-  Scale,
-  WifiOff,
-  Layers,
-  MousePointerClick,
-  Download,
-  Share2
+  Square, 
+  Image as ImageIcon, 
+  PenTool, 
+  Phone, 
+  ChevronRight, 
+  Plus, 
+  Home as HomeIcon, 
+  LayoutGrid, 
+  MoreHorizontal, 
+  Clock, 
+  Shield, 
+  Users, 
+  Wrench, 
+  BookOpen, 
+  ExternalLink, 
+  Archive, 
+  RotateCcw, 
+  Scale, 
+  WifiOff, 
+  Layers, 
+  MousePointerClick, 
+  Download, 
+  Share2 
 } from "lucide-react";
 import { sanitizeAndCompressImage } from "@/lib/sanitizeImage";
 import { supabase } from "@/lib/supabaseClient";
@@ -88,7 +88,7 @@ const INCIDENT_TYPES = [
 ];
 
 const SCAN_MESSAGES = [
-  "Letar efter prylar i bilden...",
+  "Letar efter föremål i bilden...",
   "Känner igen modeller och skick...",
   "Hämtar aktuella marknadsvärden...",
   "Förbereder dina markeringar...",
@@ -427,7 +427,7 @@ export default function HomePage() {
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
 
-    const savedQueue = localStorage.getItem("prylkoll_offline_queue");
+    const savedQueue = localStorage.getItem("bovalvet_offline_queue");
     if (savedQueue) {
       try {
         setOfflineQueue(JSON.parse(savedQueue));
@@ -443,10 +443,10 @@ export default function HomePage() {
   }, []);
 
   const processOfflineQueue = async () => {
-    const queue = JSON.parse(localStorage.getItem("prylkoll_offline_queue") || "[]");
+    const queue = JSON.parse(localStorage.getItem("bovalvet_offline_queue") || "[]");
     if (queue.length === 0 || !sessionUser) return;
 
-    showToast(`Synkar ${queue.length} offline-sparade prylar...`);
+    showToast(`Synkar ${queue.length} offline-sparade saker...`);
 
     const remainingQueue = [];
     for (const item of queue) {
@@ -469,7 +469,7 @@ export default function HomePage() {
       }
     }
 
-    localStorage.setItem("prylkoll_offline_queue", JSON.stringify(remainingQueue));
+    localStorage.setItem("bovalvet_offline_queue", JSON.stringify(remainingQueue));
     setOfflineQueue(remainingQueue);
     if (sessionUser) {
       fetchVaultStats(sessionUser.id, selectedProperty?.id);
@@ -479,14 +479,14 @@ export default function HomePage() {
   };
 
   const processPendingGuestData = async (userId: string) => {
-    const pendingJson = localStorage.getItem("prylkoll_pending_guest_item");
+    const pendingJson = localStorage.getItem("bovalvet_pending_guest_item");
     if (!pendingJson) return;
 
     try {
       const pending = JSON.parse(pendingJson);
-      localStorage.removeItem("prylkoll_pending_guest_item");
+      localStorage.removeItem("bovalvet_pending_guest_item");
 
-      showToast("Sparar dina fotade prylar till ditt konto...");
+      showToast("Sparar dina fotade saker till ditt valv...");
 
       if (pending.base64ForSave && (pending.result || (pending.multiResults && pending.multiResults.length > 0))) {
         const byteCharacters = atob(pending.base64ForSave);
@@ -524,7 +524,7 @@ export default function HomePage() {
           if (!insertErr) {
             await fetchVaultStats(userId, selectedProperty?.id);
             await fetchVaultItems(userId, selectedProperty?.id);
-            showToast(`${inserts.length} prylar har sparats i ditt valv ✓`);
+            showToast(`${inserts.length} saker har sparats i ditt valv ✓`);
           }
         } else if (pending.result) {
           const { data: insertedData, error: insertErr } = await supabase.from("items").insert({
@@ -793,7 +793,7 @@ export default function HomePage() {
       if (sessionUser) fetchVaultStats(sessionUser.id, selectedProperty?.id);
       
       setItemToDelete(null);
-      showToast("Prylen är borttagen");
+      showToast("Föremålet är borttaget");
     } catch (err: any) {
       alert(`Kunde inte radera: ${err.message}`);
     } finally {
@@ -1125,7 +1125,7 @@ export default function HomePage() {
       if (!navigator.onLine) {
         setIsAnalyzing(false);
         setResult({
-          title: "Pryl (Sparad offline)",
+          title: "Sak (Sparad offline)",
           category: "Övrigt hem & inredning",
           brand: "",
           model: "",
@@ -1151,7 +1151,7 @@ export default function HomePage() {
 
         // Spara ALLTID omedelbart till gästminnet ifall användaren klickar på social OAuth-inloggning
         if (!sessionUser) {
-          localStorage.setItem("prylkoll_pending_guest_item", JSON.stringify({
+          localStorage.setItem("bovalvet_pending_guest_item", JSON.stringify({
             result: detected.length === 1 ? detected[0] : null,
             multiResults: detected.length > 1 ? detected : null,
             base64ForSave: processed.base64ForGemini,
@@ -1166,7 +1166,7 @@ export default function HomePage() {
         } else if (detected.length > 1) {
           setMultiResults(detected);
           setSelectedMultiIndices(detected.map((_, idx) => idx));
-          showToast(`Upptäckte ${detected.length} prylar på bilden!`);
+          showToast(`Upptäckte ${detected.length} saker på bilden!`);
         } else {
           alert("Inga tydliga föremål kunde identifieras.");
         }
@@ -1176,7 +1176,7 @@ export default function HomePage() {
     } catch (err: unknown) {
       setIsAnalyzing(false);
       setResult({
-        title: "Pryl (Sparad offline)",
+        title: "Sak (Sparad offline)",
         category: "Övrigt hem & inredning",
         brand: "",
         model: "",
@@ -1207,9 +1207,9 @@ export default function HomePage() {
         base64ForSave,
         room: activeRoom,
       };
-      localStorage.setItem("prylkoll_pending_guest_item", JSON.stringify(guestData));
+      localStorage.setItem("bovalvet_pending_guest_item", JSON.stringify(guestData));
       setShowAuthModal(true);
-      showToast("Logga in för att spara din pryl i valvet!");
+      showToast("Logga in för att spara din sak i valvet!");
       return;
     }
 
@@ -1282,9 +1282,9 @@ export default function HomePage() {
         base64ForSave,
         room: activeRoom,
       };
-      localStorage.setItem("prylkoll_pending_guest_item", JSON.stringify(guestData));
+      localStorage.setItem("bovalvet_pending_guest_item", JSON.stringify(guestData));
       setShowAuthModal(true);
-      showToast("Logga in för att spara dina prylar!");
+      showToast("Logga in för att spara dina saker!");
       return;
     }
 
@@ -1325,7 +1325,7 @@ export default function HomePage() {
               itemCroppedFileName = cropName;
             }
           } catch (cropErr) {
-            console.warn("Kunde inte beskära pryl, använder översiktsbild:", cropErr);
+            console.warn("Kunde inte beskära sak, använder översiktsbild:", cropErr);
           }
         }
 
@@ -1363,7 +1363,7 @@ export default function HomePage() {
       setPreviewUrl(null);
       setBase64ForSave(null);
 
-      showToast(`${itemsToSave.length} prylar sparades med egna närbilder ✓`);
+      showToast(`${itemsToSave.length} saker sparades med egna närbilder ✓`);
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1444,7 +1444,7 @@ export default function HomePage() {
         });
       }
 
-      showToast("Prylen sparades ✓");
+      showToast("Saken sparades ✓");
     } catch (err: any) {
       alert(`Kunde inte spara: ${err.message}`);
     } finally {
@@ -1456,9 +1456,9 @@ export default function HomePage() {
     setSocialLoading(provider);
     setAuthError(null);
 
-    // Säkerställ att aktuell pryl och bild finns sparad i localStorage innan OAuth omdirigerar
+    // Säkerställ att aktuellt föremål och bild finns sparad i localStorage innan OAuth omdirigerar
     if (base64ForSave && (result || multiResults.length > 0)) {
-      localStorage.setItem("prylkoll_pending_guest_item", JSON.stringify({
+      localStorage.setItem("bovalvet_pending_guest_item", JSON.stringify({
         result,
         multiResults: multiResults.length > 0 ? multiResults.filter((_, idx) => selectedMultiIndices.includes(idx)) : null,
         base64ForSave,
@@ -1624,7 +1624,7 @@ export default function HomePage() {
           <header className="h-16 px-5 flex items-center justify-between z-20">
             <div className="flex items-center gap-2.5">
               <div className="w-10 h-10 rounded-xl bg-[var(--color-primary)] text-[var(--color-onp,#fff)] flex items-center justify-center font-extrabold text-base shadow-xs">
-                PK
+                BV
               </div>
               <button
                 onClick={() => {
@@ -1795,7 +1795,7 @@ export default function HomePage() {
 
               <div>
                 <h1 className="text-[22px] font-extrabold text-[var(--color-text)]">
-                  Hittade {multiResults.length} prylar
+                  Hittade {multiResults.length} saker
                 </h1>
                 <p className="text-sm text-[var(--color-text-soft)] mt-0.5">
                   Tryck på markörerna på fotot för att välja vad du vill spara i <strong>{activeRoom}</strong>.
@@ -1891,10 +1891,10 @@ export default function HomePage() {
                   ) : (
                     <span>
                       {selectedMultiIndices.length === 0 
-                        ? "Välj minst en pryl att spara" 
+                        ? "Välj minst en sak att spara" 
                         : sessionUser 
-                          ? `Spara ${selectedMultiIndices.length} prylar i ${activeRoom}` 
-                          : "Logga in för att spara dina prylar"}
+                          ? `Spara ${selectedMultiIndices.length} saker i ${activeRoom}` 
+                          : "Logga in för att spara dina saker"}
                     </span>
                   )}
                 </button>
@@ -1993,7 +1993,7 @@ export default function HomePage() {
                   {isSaving ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
                   ) : (
-                    <span>{sessionUser ? `Spara i ${activeRoom}` : "Logga in och spara pryl"}</span>
+                    <span>{sessionUser ? `Spara i ${activeRoom}` : "Logga in och spara sak"}</span>
                   )}
                 </button>
                 <button
@@ -2134,9 +2134,9 @@ export default function HomePage() {
                 {activeVaultItems.length === 0 ? (
                   <div className="text-center py-10 bg-[var(--color-surface)] rounded-3xl border border-[var(--color-border)] p-6 space-y-3 shadow-card">
                     <span className="text-4xl">📷</span>
-                    <h3 className="font-bold text-lg text-[var(--color-text)]">Börja med en pryl</h3>
+                    <h3 className="font-bold text-lg text-[var(--color-text)]">Börja med en sak</h3>
                     <p className="text-[16px] text-[var(--color-text-soft)]">
-                      Ta ett foto på en pryl eller en hel yta, så fyller vi i märke, modell och värde.
+                      Ta ett foto på ett föremål eller en hel yta, så fyller vi i märke, modell och värde.
                     </p>
                     <button
                       type="button"
@@ -2144,7 +2144,7 @@ export default function HomePage() {
                       className="min-h-[52px] px-6 rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base inline-flex items-center gap-2"
                     >
                       <Camera className="w-5 h-5" />
-                      <span>Fota din första pryl</span>
+                      <span>Fota din första sak</span>
                     </button>
                   </div>
                 ) : (
@@ -2354,7 +2354,7 @@ export default function HomePage() {
 
                 {displayedWarrantyItems.length === 0 ? (
                   <div className="bg-[var(--color-surface)] p-4 rounded-2xl border border-[var(--color-border)] text-center text-base text-[var(--color-text-soft)]">
-                    Inga prylar med registrerat inköpsdatum matchar detta filter. Fota ett kvitto för att lägga till garanti.
+                    Inga föremål med registrerat inköpsdatum matchar detta filter. Fota ett kvitto för att lägga till garanti.
                   </div>
                 ) : (
                   <div className="space-y-2.5">
@@ -2529,7 +2529,7 @@ export default function HomePage() {
               </button>
 
               <div>
-                <h1 className="text-[24px] font-extrabold text-[var(--color-text)]">Arkiv & Sålda prylar</h1>
+                <h1 className="text-[24px] font-extrabold text-[var(--color-text)]">Arkiv & Sålda saker</h1>
                 <p className="text-[15px] text-[var(--color-text-soft)] mt-1">
                   Dessa saker räknas inte in i hemmets lösöresvärde, men kvitton och garantier är tryggt sparade.
                 </p>
@@ -2541,7 +2541,7 @@ export default function HomePage() {
                     <span className="text-4xl">📦</span>
                     <h3 className="font-bold text-lg text-[var(--color-text)]">Arkivet är tomt</h3>
                     <p className="text-[15px] text-[var(--color-text-soft)]">
-                      När du säljer eller gör dig av med en pryl kan du arkivera den här istället för att radera kvittot.
+                      När du säljer eller gör dig av med en sak kan du arkivera den här istället för att radera kvittot.
                     </p>
                   </div>
                 ) : (
@@ -2879,7 +2879,7 @@ export default function HomePage() {
                   className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary-soft)] border border-[var(--color-primary)] font-bold text-base flex items-center justify-center gap-2.5 text-[var(--color-primary)] shadow-card active:scale-[.98] transition"
                 >
                   <ShoppingBag className="w-5 h-5" />
-                  <span>Sälj pryl (Blocket / Marketplace / Tradera)</span>
+                  <span>Sälj sak (Blocket / Marketplace / Tradera)</span>
                 </button>
 
                 <div>
@@ -2954,7 +2954,7 @@ export default function HomePage() {
                   type="button"
                   onClick={() => setShowAddActionSheet(true)}
                   className="absolute -top-7 w-[62px] h-[62px] rounded-full bg-[var(--color-accent)] text-white flex items-center justify-center border-4 border-[var(--color-bg)] shadow-[0_8px_20px_rgba(224,83,58,0.4)] active:scale-95 transition"
-                  aria-label="Lägg till pryl"
+                  aria-label="Lägg till sak"
                 >
                   <Camera className="w-7 h-7 stroke-[2.2]" />
                 </button>
@@ -3005,17 +3005,17 @@ export default function HomePage() {
 
               <div className="space-y-2 text-left">
                 <h3 className="text-xl font-extrabold text-[var(--color-text)]">
-                  Säkra hela ditt hem med PrylKoll Pro
+                  Säkra hela ditt hem med BoValvet Pro
                 </h3>
                 <p className="text-sm text-[var(--color-text-soft)] leading-relaxed">
-                  Du har nått gränsen för gratisversionen ({FREE_ITEM_LIMIT} prylar). Lås upp alla funktioner och skydda dina värdesaker på riktigt:
+                  Du har nått gränsen för gratisversionen ({FREE_ITEM_LIMIT} saker). Lås upp alla funktioner och skydda dina värdesaker på riktigt:
                 </p>
               </div>
 
               <div className="space-y-2.5 text-sm font-medium text-[var(--color-text)] text-left">
                 <div className="flex items-center gap-2.5">
                   <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                  <span>Obegränsat antal prylar och kvitton</span>
+                  <span>Obegränsat antal saker och kvitton</span>
                 </div>
                 <div className="flex items-center gap-2.5">
                   <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
@@ -3041,7 +3041,7 @@ export default function HomePage() {
                   }}
                   className="min-h-[52px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98]"
                 >
-                  <span>Starta PrylKoll Pro (349 kr/år)</span>
+                  <span>Starta BoValvet Pro (349 kr/år)</span>
                 </button>
                 <button
                   type="button"
@@ -3094,7 +3094,7 @@ export default function HomePage() {
                 <div className="p-4 rounded-2xl bg-gradient-to-r from-[var(--color-primary-soft)] to-[var(--color-surface)] border border-[var(--color-primary)] flex items-center justify-between">
                   <div>
                     <b className="text-sm block">Uppgradera till Pro</b>
-                    <span className="text-xs text-[var(--color-text-soft)]">Lås upp obegränsade prylar & skadepaket</span>
+                    <span className="text-xs text-[var(--color-text-soft)]">Lås upp obegränsade saker & skadepaket</span>
                   </div>
                   <button
                     onClick={() => {
@@ -3156,7 +3156,7 @@ export default function HomePage() {
               >
                 <span className="flex items-center gap-3">
                   <Archive className="w-5 h-5 text-[var(--color-primary)]" />
-                  <span>Arkiv & sålda prylar ({archivedVaultItems.length})</span>
+                  <span>Arkiv & sålda saker ({archivedVaultItems.length})</span>
                 </span>
                 <ChevronRight className="w-5 h-5 text-[var(--color-text-soft)]" />
               </button>
@@ -3191,11 +3191,11 @@ export default function HomePage() {
                 Arkivera {itemToArchive.title}
               </h2>
               <p className="text-[15px] text-[var(--color-text-soft)]">
-                Prylen tas bort från ditt aktiva hemvärde, men du behåller kvitton och garanti tryggt i arkivet.
+                Saken tas bort från ditt aktiva hemvärde, men du behåller kvitton och garanti tryggt i arkivet.
               </p>
 
               <div>
-                <label className="text-xs font-semibold text-[var(--color-text-soft)] block mb-1">Vad hände med prylen?</label>
+                <label className="text-xs font-semibold text-[var(--color-text-soft)] block mb-1">Vad hände med föremålet?</label>
                 <div className="grid grid-cols-3 gap-2">
                   {["Såld", "Bortskänkt", "Kasserad"].map((reason) => (
                     <button
@@ -3321,7 +3321,7 @@ export default function HomePage() {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="w-11 h-1.5 bg-[var(--color-border)] rounded-full mx-auto mb-2" />
-              <h2 className="text-[20px] font-extrabold text-[var(--color-text)]">Lägg till pryl</h2>
+              <h2 className="text-[20px] font-extrabold text-[var(--color-text)]">Lägg till sak</h2>
 
               <div className="space-y-2.5">
                 <button
@@ -3335,7 +3335,7 @@ export default function HomePage() {
                   <span className="text-3xl">📷</span>
                   <div>
                     <b className="text-[17px] block">Fota och låt AI fylla i</b>
-                    <span className="text-[15px] opacity-90">Hittar enskild eller flera prylar i samma bild</span>
+                    <span className="text-[15px] opacity-90">Hittar enskild eller flera saker i samma bild</span>
                   </div>
                 </button>
 
@@ -3523,7 +3523,7 @@ export default function HomePage() {
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
                         <span>
                           {activeListingTab === "blocket" && "Blocket öppnas – välj Torget och klistra in!"}
-                          {activeListingTab === "marketplace" && "Marketplace öppnas direkt i pryl-läget – klistra in!"}
+                          {activeListingTab === "marketplace" && "Marketplace öppnas direkt i annonsläget – klistra in!"}
                           {activeListingTab === "tradera" && "Tradera öppnas direkt i auktionsskapare – klistra in!"}
                         </span>
                       </div>
@@ -3722,7 +3722,7 @@ export default function HomePage() {
                   disabled={isSavingManual}
                   className="min-h-[52px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2 shadow-sm"
                 >
-                  {isSavingManual ? <Loader2 className="w-5 h-5 animate-spin" /> : <span>Spara pryl</span>}
+                  {isSavingManual ? <Loader2 className="w-5 h-5 animate-spin" /> : <span>Spara sak</span>}
                 </button>
               </form>
             </div>
@@ -3919,13 +3919,13 @@ export default function HomePage() {
             <div className="bg-[var(--color-surface)] rounded-3xl p-6 w-full max-w-sm border border-[var(--color-border)] space-y-4 shadow-xl">
               <div className="text-center space-y-1">
                 <div className="w-12 h-12 rounded-2xl bg-[var(--color-primary-soft)] text-[var(--color-primary)] flex items-center justify-center mx-auto font-black text-lg">
-                  PK
+                  BV
                 </div>
                 <h3 className="text-lg font-bold text-[var(--color-text)]">
-                  {authIsSignUp ? "Säkra ditt hem" : "Logga in"}
+                  {authIsSignUp ? "Säkra ditt hem med BoValvet" : "Logga in"}
                 </h3>
                 <p className="text-sm text-[var(--color-text-soft)]">
-                  Dina inventarier krypteras och sparas tryggt.
+                  Dina inventarier krypteras och sparas tryggt i ditt valv.
                 </p>
               </div>
 
@@ -4001,7 +4001,7 @@ export default function HomePage() {
                   disabled={authLoading || Boolean(socialLoading)}
                   className="min-h-[50px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2"
                 >
-                  {authLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <span>{authIsSignUp ? "Skapa konto & Spara pryl" : "Logga in"}</span>}
+                  {authLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <span>{authIsSignUp ? "Skapa konto & Säkra sak" : "Logga in"}</span>}
                 </button>
               </form>
 
