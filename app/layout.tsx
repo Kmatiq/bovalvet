@@ -1,34 +1,44 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+export const viewport: Viewport = {
+  themeColor: "#0d1311",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+};
 
 export const metadata: Metadata = {
-  title: "PrylKoll – Säkra hemmets värden",
-  description: "Ha koll på dina prylar med AI-inventering, kvittohantering och skadeunderlag.",
+  title: "BoValvet – Säkra hemmets värden",
+  description: "Ditt smarta hemvalv med AI-inventering, kvittoarkiv och skadeunderlag.",
+  applicationName: "BoValvet",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "default",
-    title: "PrylKoll",
+    statusBarStyle: "black-translucent",
+    title: "BoValvet",
+  },
+  icons: {
+    icon: "/icon.svg",
+    apple: "/icon.svg",
+  },
+  openGraph: {
+    title: "BoValvet – Säkra hemmets värden",
+    description: "Smart hemvalv med AI-inventering, kvittohantering och skadeunderlag.",
+    siteName: "BoValvet",
+    locale: "sv_SE",
+    type: "website",
   },
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col">{children}</body>
+    <html lang="sv">
+      <body className="antialiased bg-[#0d1311]">{children}</body>
     </html>
   );
 }
