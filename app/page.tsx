@@ -62,7 +62,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { generateVaultPdf, generateIncidentPdf } from "@/lib/generatePdfReport";
 
 const STANDARD_ROOMS: Record<string, string> = {
-  "Vardagsrum": "🛋️",
+  "Vardagsrum": "🛋️️",
   "Kök": "🍳",
   "Badrum": "🛁",
   "Tvättstuga": "🧺",
@@ -155,9 +155,9 @@ interface VaultItem {
 }
 
 function formatItemsCount(count: number) {
-  if (count === 0) return "inga föremål sparade än";
-  if (count === 1) return "1 föremål säkrat";
-  return `${count} föremål säkrade`;
+  if (count === 0) return "inga föremål inventerade ännu";
+  if (count === 1) return "1 föremål inventerat";
+  return `${count} föremål inventerade`;
 }
 
 function getWarrantyStatus(purchaseDateStr?: string, warrantyMonths: number = 36) {
@@ -1147,7 +1147,22 @@ export default function HomePage() {
 
       const response = await res.json();
       if (response.success && response.items) {
-        const detected: ItemAnalysisResult[] = response.items;
+        // Filtrera bort eventuella byggnader, spårvagnar eller orimliga priser
+        const detected: ItemAnalysisResult[] = response.items.filter((item: ItemAnalysisResult) => {
+          const isTooExpensive = item.estimated_replacement_cost_sek > 10_000_000;
+          const isBuildingOrVehicle = /skyskrapa|byggnad|fastighet|spårvagn|tunnelbana|lokaltrafik|tåg/i.test(
+            (item.title || "") + (item.category || "")
+          );
+          return !isTooExpensive && !isBuildingOrVehicle;
+        });
+
+        if (detected.length === 0) {
+          alert("Inga heminventarier eller godkänt lösöre kunde identifieras. Kontrollera att bilden föreställer ett privat föremål.");
+          setIsAnalyzing(false);
+          setPreviewUrl(null);
+          setBase64ForSave(null);
+          return;
+        }
 
         // Spara ALLTID omedelbart till gästminnet ifall användaren klickar på social OAuth-inloggning
         if (!sessionUser) {
@@ -1167,8 +1182,6 @@ export default function HomePage() {
           setMultiResults(detected);
           setSelectedMultiIndices(detected.map((_, idx) => idx));
           showToast(`Upptäckte ${detected.length} föremål på bilden!`);
-        } else {
-          alert("Inga tydliga föremål kunde identifieras.");
         }
       } else {
         alert(response.error || "Kunde inte tolka föremålet.");
