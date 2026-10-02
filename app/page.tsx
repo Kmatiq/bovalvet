@@ -155,9 +155,9 @@ interface VaultItem {
 }
 
 function formatItemsCount(count: number) {
-  if (count === 0) return "inga saker sparade än";
-  if (count === 1) return "1 sak säkrad";
-  return `${count} saker säkrade`;
+  if (count === 0) return "inga föremål sparade än";
+  if (count === 1) return "1 föremål säkrat";
+  return `${count} föremål säkrade`;
 }
 
 function getWarrantyStatus(purchaseDateStr?: string, warrantyMonths: number = 36) {
@@ -446,7 +446,7 @@ export default function HomePage() {
     const queue = JSON.parse(localStorage.getItem("bovalvet_offline_queue") || "[]");
     if (queue.length === 0 || !sessionUser) return;
 
-    showToast(`Synkar ${queue.length} offline-sparade saker...`);
+    showToast(`Synkar ${queue.length} offline-sparade föremål...`);
 
     const remainingQueue = [];
     for (const item of queue) {
@@ -486,7 +486,7 @@ export default function HomePage() {
       const pending = JSON.parse(pendingJson);
       localStorage.removeItem("bovalvet_pending_guest_item");
 
-      showToast("Sparar dina fotade saker till ditt valv...");
+      showToast("Sparar dina fotade föremål till ditt valv...");
 
       if (pending.base64ForSave && (pending.result || (pending.multiResults && pending.multiResults.length > 0))) {
         const byteCharacters = atob(pending.base64ForSave);
@@ -524,7 +524,7 @@ export default function HomePage() {
           if (!insertErr) {
             await fetchVaultStats(userId, selectedProperty?.id);
             await fetchVaultItems(userId, selectedProperty?.id);
-            showToast(`${inserts.length} saker har sparats i ditt valv ✓`);
+            showToast(`${inserts.length} föremål har sparats i ditt valv ✓`);
           }
         } else if (pending.result) {
           const { data: insertedData, error: insertErr } = await supabase.from("items").insert({
@@ -1125,7 +1125,7 @@ export default function HomePage() {
       if (!navigator.onLine) {
         setIsAnalyzing(false);
         setResult({
-          title: "Sak (Sparad offline)",
+          title: "Föremål (Sparat offline)",
           category: "Övrigt hem & inredning",
           brand: "",
           model: "",
@@ -1166,7 +1166,7 @@ export default function HomePage() {
         } else if (detected.length > 1) {
           setMultiResults(detected);
           setSelectedMultiIndices(detected.map((_, idx) => idx));
-          showToast(`Upptäckte ${detected.length} saker på bilden!`);
+          showToast(`Upptäckte ${detected.length} föremål på bilden!`);
         } else {
           alert("Inga tydliga föremål kunde identifieras.");
         }
@@ -1176,7 +1176,7 @@ export default function HomePage() {
     } catch (err: unknown) {
       setIsAnalyzing(false);
       setResult({
-        title: "Sak (Sparad offline)",
+        title: "Föremål (Sparat offline)",
         category: "Övrigt hem & inredning",
         brand: "",
         model: "",
@@ -1209,7 +1209,7 @@ export default function HomePage() {
       };
       localStorage.setItem("bovalvet_pending_guest_item", JSON.stringify(guestData));
       setShowAuthModal(true);
-      showToast("Logga in för att spara din sak i valvet!");
+      showToast("Logga in för att spara ditt föremål i valvet!");
       return;
     }
 
@@ -1264,7 +1264,7 @@ export default function HomePage() {
         setActiveImageIndex(0);
       }
 
-      showToast(`Sparad i ${activeRoom} ✓`);
+      showToast(`Sparat i ${activeRoom} ✓`);
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1284,7 +1284,7 @@ export default function HomePage() {
       };
       localStorage.setItem("bovalvet_pending_guest_item", JSON.stringify(guestData));
       setShowAuthModal(true);
-      showToast("Logga in för att spara dina saker!");
+      showToast("Logga in för att spara dina föremål!");
       return;
     }
 
@@ -1325,7 +1325,7 @@ export default function HomePage() {
               itemCroppedFileName = cropName;
             }
           } catch (cropErr) {
-            console.warn("Kunde inte beskära sak, använder översiktsbild:", cropErr);
+            console.warn("Kunde inte beskära föremål, använder översiktsbild:", cropErr);
           }
         }
 
@@ -1363,7 +1363,7 @@ export default function HomePage() {
       setPreviewUrl(null);
       setBase64ForSave(null);
 
-      showToast(`${itemsToSave.length} saker sparades med egna närbilder ✓`);
+      showToast(`${itemsToSave.length} föremål sparades med egna närbilder ✓`);
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1444,7 +1444,7 @@ export default function HomePage() {
         });
       }
 
-      showToast("Saken sparades ✓");
+      showToast("Föremålet sparades ✓");
     } catch (err: any) {
       alert(`Kunde inte spara: ${err.message}`);
     } finally {
@@ -1795,7 +1795,7 @@ export default function HomePage() {
 
               <div>
                 <h1 className="text-[22px] font-extrabold text-[var(--color-text)]">
-                  Hittade {multiResults.length} saker
+                  Hittade {multiResults.length} föremål
                 </h1>
                 <p className="text-sm text-[var(--color-text-soft)] mt-0.5">
                   Tryck på markörerna på fotot för att välja vad du vill spara i <strong>{activeRoom}</strong>.
@@ -1891,10 +1891,10 @@ export default function HomePage() {
                   ) : (
                     <span>
                       {selectedMultiIndices.length === 0 
-                        ? "Välj minst en sak att spara" 
+                        ? "Välj minst ett föremål att spara" 
                         : sessionUser 
-                          ? `Spara ${selectedMultiIndices.length} saker i ${activeRoom}` 
-                          : "Logga in för att spara dina saker"}
+                          ? `Spara ${selectedMultiIndices.length} föremål i ${activeRoom}` 
+                          : "Logga in för att spara dina föremål"}
                     </span>
                   )}
                 </button>
@@ -1993,7 +1993,7 @@ export default function HomePage() {
                   {isSaving ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
                   ) : (
-                    <span>{sessionUser ? `Spara i ${activeRoom}` : "Logga in och spara sak"}</span>
+                    <span>{sessionUser ? `Spara i ${activeRoom}` : "Logga in och spara föremål"}</span>
                   )}
                 </button>
                 <button
@@ -2020,7 +2020,7 @@ export default function HomePage() {
 
               <div className="bg-gradient-to-br from-[var(--color-primary-soft)] to-[var(--color-surface)] rounded-3xl p-5 border border-[var(--color-border)] shadow-card space-y-3">
                 <span className="text-[15px] text-[var(--color-text-soft)] font-semibold block">
-                  Värdet på dina saker
+                  Värdet på dina föremål
                 </span>
                 <div className="text-[40px] font-black tracking-tight text-[var(--color-text)] leading-none">
                   {totalValuationSek.toLocaleString("sv-SE")} kr
@@ -2134,7 +2134,7 @@ export default function HomePage() {
                 {activeVaultItems.length === 0 ? (
                   <div className="text-center py-10 bg-[var(--color-surface)] rounded-3xl border border-[var(--color-border)] p-6 space-y-3 shadow-card">
                     <span className="text-4xl">📷</span>
-                    <h3 className="font-bold text-lg text-[var(--color-text)]">Börja med en sak</h3>
+                    <h3 className="font-bold text-lg text-[var(--color-text)]">Börja med ett föremål</h3>
                     <p className="text-[16px] text-[var(--color-text-soft)]">
                       Ta ett foto på ett föremål eller en hel yta, så fyller vi i märke, modell och värde.
                     </p>
@@ -2144,7 +2144,7 @@ export default function HomePage() {
                       className="min-h-[52px] px-6 rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base inline-flex items-center gap-2"
                     >
                       <Camera className="w-5 h-5" />
-                      <span>Fota din första sak</span>
+                      <span>Fota ditt första föremål</span>
                     </button>
                   </div>
                 ) : (
@@ -2290,7 +2290,7 @@ export default function HomePage() {
                   <strong>{totalValuationSek.toLocaleString("sv-SE")} kr</strong> säkrat av <strong>{Number(selectedProperty?.coverage_limit_sek || 1000000).toLocaleString("sv-SE")} kr</strong>
                 </div>
                 <p className="text-[16px] text-[var(--color-text-soft)]">
-                  Du kan fortsätta lägga till saker när som helst.
+                  Du kan fortsätta lägga till föremål när som helst.
                 </p>
               </div>
 
@@ -2427,7 +2427,7 @@ export default function HomePage() {
               <div>
                 <h1 className="text-[26px] font-extrabold text-[var(--color-text)] pt-1">Kunskap & Trygghet</h1>
                 <p className="text-[16px] text-[var(--color-text-soft)] mt-1">
-                  Guider om dina rättigheter, garantier och hur försäkringsbolag bedömer dina saker.
+                  Guider om dina rättigheter, garantier och hur försäkringsbolag bedömer dina föremål.
                 </p>
               </div>
 
@@ -2529,9 +2529,9 @@ export default function HomePage() {
               </button>
 
               <div>
-                <h1 className="text-[24px] font-extrabold text-[var(--color-text)]">Arkiv & Sålda saker</h1>
+                <h1 className="text-[24px] font-extrabold text-[var(--color-text)]">Arkiv & Sålda föremål</h1>
                 <p className="text-[15px] text-[var(--color-text-soft)] mt-1">
-                  Dessa saker räknas inte in i hemmets lösöresvärde, men kvitton och garantier är tryggt sparade.
+                  Dessa föremål räknas inte in i hemmets lösöresvärde, men kvitton och garantier är tryggt sparade.
                 </p>
               </div>
 
@@ -2541,7 +2541,7 @@ export default function HomePage() {
                     <span className="text-4xl">📦</span>
                     <h3 className="font-bold text-lg text-[var(--color-text)]">Arkivet är tomt</h3>
                     <p className="text-[15px] text-[var(--color-text-soft)]">
-                      När du säljer eller gör dig av med en sak kan du arkivera den här istället för att radera kvittot.
+                      När du säljer eller gör dig av med ett föremål kan du arkivera det här istället för att radera kvittot.
                     </p>
                   </div>
                 ) : (
@@ -2621,7 +2621,7 @@ export default function HomePage() {
                   className="px-3.5 py-1.5 rounded-xl bg-[var(--color-primary)] text-white text-xs font-bold flex items-center gap-1 shadow-2xs"
                 >
                   <Camera className="w-3.5 h-3.5" />
-                  <span>Fota en till i {editingItem.room}</span>
+                  <span>Fota ett till i {editingItem.room}</span>
                 </button>
               </div>
 
@@ -2853,7 +2853,7 @@ export default function HomePage() {
                       <span>Skötsel & Manual</span>
                     </div>
                     <p className="text-[14px] text-[var(--color-text-soft)] leading-relaxed">
-                      Underhållstips och bruksanvisning för din <strong>{editingItem.title}</strong> ({editingItem.brand || "Märke saknas"}).
+                      Underhållstips och bruksanvisning för ditt <strong>{editingItem.title}</strong> ({editingItem.brand || "Märke saknas"}).
                     </p>
 
                     <div className="space-y-2 pt-1">
@@ -2879,7 +2879,7 @@ export default function HomePage() {
                   className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary-soft)] border border-[var(--color-primary)] font-bold text-base flex items-center justify-center gap-2.5 text-[var(--color-primary)] shadow-card active:scale-[.98] transition"
                 >
                   <ShoppingBag className="w-5 h-5" />
-                  <span>Sälj sak (Blocket / Marketplace / Tradera)</span>
+                  <span>Sälj föremål (Blocket / Marketplace / Tradera)</span>
                 </button>
 
                 <div>
@@ -2908,7 +2908,7 @@ export default function HomePage() {
                     className="min-h-[48px] w-full rounded-2xl bg-[var(--color-bg)] border border-[var(--color-border)] font-bold text-base flex items-center justify-center gap-2 text-[var(--color-text)] hover:bg-[var(--color-primary-soft)] transition"
                   >
                     <Archive className="w-4 h-4 text-[var(--color-primary)]" />
-                    <span>Arkivera / Markera som såld</span>
+                    <span>Arkivera / Markera som sålt</span>
                   </button>
 
                   <button
@@ -2954,7 +2954,7 @@ export default function HomePage() {
                   type="button"
                   onClick={() => setShowAddActionSheet(true)}
                   className="absolute -top-7 w-[62px] h-[62px] rounded-full bg-[var(--color-accent)] text-white flex items-center justify-center border-4 border-[var(--color-bg)] shadow-[0_8px_20px_rgba(224,83,58,0.4)] active:scale-95 transition"
-                  aria-label="Lägg till sak"
+                  aria-label="Lägg till föremål"
                 >
                   <Camera className="w-7 h-7 stroke-[2.2]" />
                 </button>
@@ -3008,14 +3008,14 @@ export default function HomePage() {
                   Säkra hela ditt hem med BoValvet Pro
                 </h3>
                 <p className="text-sm text-[var(--color-text-soft)] leading-relaxed">
-                  Du har nått gränsen för gratisversionen ({FREE_ITEM_LIMIT} saker). Lås upp alla funktioner och skydda dina värdesaker på riktigt:
+                  Du har nått gränsen för gratisversionen ({FREE_ITEM_LIMIT} föremål). Lås upp alla funktioner och skydda dina värdesaker på riktigt:
                 </p>
               </div>
 
               <div className="space-y-2.5 text-sm font-medium text-[var(--color-text)] text-left">
                 <div className="flex items-center gap-2.5">
                   <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                  <span>Obegränsat antal saker och kvitton</span>
+                  <span>Obegränsat antal föremål och kvitton</span>
                 </div>
                 <div className="flex items-center gap-2.5">
                   <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
@@ -3094,7 +3094,7 @@ export default function HomePage() {
                 <div className="p-4 rounded-2xl bg-gradient-to-r from-[var(--color-primary-soft)] to-[var(--color-surface)] border border-[var(--color-primary)] flex items-center justify-between">
                   <div>
                     <b className="text-sm block">Uppgradera till Pro</b>
-                    <span className="text-xs text-[var(--color-text-soft)]">Lås upp obegränsade saker & skadepaket</span>
+                    <span className="text-xs text-[var(--color-text-soft)]">Lås upp obegränsade föremål & skadepaket</span>
                   </div>
                   <button
                     onClick={() => {
@@ -3156,7 +3156,7 @@ export default function HomePage() {
               >
                 <span className="flex items-center gap-3">
                   <Archive className="w-5 h-5 text-[var(--color-primary)]" />
-                  <span>Arkiv & sålda saker ({archivedVaultItems.length})</span>
+                  <span>Arkiv & sålda föremål ({archivedVaultItems.length})</span>
                 </span>
                 <ChevronRight className="w-5 h-5 text-[var(--color-text-soft)]" />
               </button>
@@ -3191,7 +3191,7 @@ export default function HomePage() {
                 Arkivera {itemToArchive.title}
               </h2>
               <p className="text-[15px] text-[var(--color-text-soft)]">
-                Saken tas bort från ditt aktiva hemvärde, men du behåller kvitton och garanti tryggt i arkivet.
+                Föremålet tas bort från ditt aktiva hemvärde, men du behåller kvitton och garanti tryggt i arkivet.
               </p>
 
               <div>
@@ -3321,7 +3321,7 @@ export default function HomePage() {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="w-11 h-1.5 bg-[var(--color-border)] rounded-full mx-auto mb-2" />
-              <h2 className="text-[20px] font-extrabold text-[var(--color-text)]">Lägg till sak</h2>
+              <h2 className="text-[20px] font-extrabold text-[var(--color-text)]">Lägg till föremål</h2>
 
               <div className="space-y-2.5">
                 <button
@@ -3335,7 +3335,7 @@ export default function HomePage() {
                   <span className="text-3xl">📷</span>
                   <div>
                     <b className="text-[17px] block">Fota och låt AI fylla i</b>
-                    <span className="text-[15px] opacity-90">Hittar enskild eller flera saker i samma bild</span>
+                    <span className="text-[15px] opacity-90">Hittar enskilda eller flera föremål i samma bild</span>
                   </div>
                 </button>
 
@@ -3722,7 +3722,7 @@ export default function HomePage() {
                   disabled={isSavingManual}
                   className="min-h-[52px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2 shadow-sm"
                 >
-                  {isSavingManual ? <Loader2 className="w-5 h-5 animate-spin" /> : <span>Spara sak</span>}
+                  {isSavingManual ? <Loader2 className="w-5 h-5 animate-spin" /> : <span>Spara föremål</span>}
                 </button>
               </form>
             </div>
@@ -4001,7 +4001,7 @@ export default function HomePage() {
                   disabled={authLoading || Boolean(socialLoading)}
                   className="min-h-[50px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2"
                 >
-                  {authLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <span>{authIsSignUp ? "Skapa konto & Säkra sak" : "Logga in"}</span>}
+                  {authLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <span>{authIsSignUp ? "Skapa konto & Säkra föremål" : "Logga in"}</span>}
                 </button>
               </form>
 
