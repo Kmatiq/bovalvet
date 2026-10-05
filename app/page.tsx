@@ -180,9 +180,9 @@ interface VaultItem {
 }
 
 function formatItemsCount(count: number) {
-  if (count === 0) return "inga föremål inventerade ännu";
-  if (count === 1) return "1 föremål inventerat";
-  return `${count} föremål inventerade`;
+  if (count === 0) return "inga föremål ännu";
+  if (count === 1) return "1 föremål";
+  return `${count} föremål`;
 }
 
 function getWarrantyStatus(purchaseDateStr?: string, warrantyMonths: number = 36) {
@@ -2427,155 +2427,198 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* STARTSIDA (HEM) – LUGN, FOKUSERAD & UTAN RUMSKARUSELL */}
+          {/* STARTSIDA (HEM) */}
           {!showRoomPickerScreen && !isAnalyzing && !result && multiResults.length === 0 && !editingItem && !showArchiveHub && currentNav === "home" && (
             <div className="space-y-6 animate-in fade-in">
-              {/* PUNKT 1: Hälsning utan textupprepning */}
-              <div>
-                <h1 className="text-[26px] font-extrabold text-[var(--color-text)]">
-                  Hej, {displayName || (sessionUser ? "där" : "gäst")}!
-                </h1>
-                <p className="text-[15px] text-[var(--color-text-soft)] mt-0.5 font-medium">
-                  Översikt för {selectedProperty?.name || "hemmet"}
-                </p>
-              </div>
-
-              {/* PUNKT 2 & 3: Integrerat Huvudkort med inbakad rumsstatus */}
-              <div className="bg-gradient-to-br from-[var(--color-primary-soft)] to-[var(--color-surface)] rounded-3xl p-5 border border-[var(--color-border)] shadow-card space-y-4">
-                <div>
-                  <span className="text-[14px] text-[var(--color-text-soft)] font-semibold block">
-                    Värdet på dina föremål
-                  </span>
-                  <div className="text-[40px] font-black tracking-tight text-[var(--color-text)] leading-none mt-1">
-                    {totalValuationSek.toLocaleString("sv-SE")} kr
-                  </div>
-                  <p className="text-[15px] text-[var(--color-text)] leading-snug mt-2">
-                    {formatItemsCount(activeVaultItems.length)} säkrade med foto och uppgifter
-                  </p>
-                </div>
-
-                {/* Framsteg & Inbakad Nästa-steg-knapp */}
-                <div className="p-3 bg-[var(--color-surface)]/80 rounded-2xl border border-[var(--color-border)] space-y-2">
-                  <div className="flex items-center justify-between text-[14px]">
-                    <span className="text-[var(--color-text-soft)] font-medium">
-                      Inventering: <strong>{startedRoomCount} av {allRooms.length} rum</strong>
-                    </span>
-                    {firstEmptyRoom && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveRoom(firstEmptyRoom);
-                          setShowRoomPickerScreen(true);
-                        }}
-                        className="text-[var(--color-primary)] font-extrabold flex items-center gap-1 hover:underline active:scale-95 transition"
-                      >
-                        <Camera className="w-3.5 h-3.5" />
-                        <span>Nästa: {firstEmptyRoom}</span>
-                      </button>
-                    )}
-                  </div>
-                  <div className="w-full bg-[var(--color-border)] rounded-full h-2 overflow-hidden">
-                    <div 
-                      className="h-full bg-[var(--color-primary)] rounded-full transition-all duration-500"
-                      style={{ width: `${Math.round((startedRoomCount / Math.max(allRooms.length, 1)) * 100)}%` }}
-                    />
-                  </div>
-                </div>
-
-                <div className="pt-1 border-t border-[var(--color-border)] flex items-center justify-between text-[14px] text-[var(--color-text-soft)]">
-                  <span>Försäkringstak: {Number(selectedProperty?.coverage_limit_sek || 1000000).toLocaleString("sv-SE")} kr</span>
-                  <button onClick={() => setCurrentNav("insurance")} className="text-[var(--color-primary)] font-bold hover:underline">
-                    Se villkor & skydd
-                  </button>
-                </div>
-              </div>
-
-              {/* PUNKT 6: Garantivarning (endast om akut) */}
-              {expiringSoonItems.length > 0 && (
-                <div 
-                  onClick={() => {
-                    setWarrantyFilter("expiring_soon");
-                    setCurrentNav("insurance");
-                  }}
-                  className="bg-[var(--color-warn-bg)] border border-[var(--color-border)] p-4 rounded-3xl cursor-pointer shadow-card flex items-center gap-3.5 active:scale-[.98] transition"
-                >
-                  <Clock className="w-6 h-6 text-[var(--color-warn-text)] flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <b className="text-[16px] text-[var(--color-warn-text)] block font-bold">
-                      {expiringSoonItems.length} {expiringSoonItems.length === 1 ? "garanti" : "garantier"} löper ut snart!
-                    </b>
-                    <span className="text-[14px] text-[var(--color-text-soft)] block truncate">
-                      T.ex. {expiringSoonItems[0].title}. Kontrollera skicket innan tidsfristen går ut.
-                    </span>
-                  </div>
-                  <ChevronRight className="w-5 h-5 text-[var(--color-warn-text)] opacity-60 flex-shrink-0" />
-                </div>
-              )}
-
-              {/* PUNKT 5: Senast tillagt (lyft upp direkt, rumskarusell borttagen) */}
-              <div className="space-y-3 pt-1">
-                <div className="flex justify-between items-center">
-                  <h2 className="text-[20px] font-extrabold text-[var(--color-text)]">Senast tillagt</h2>
-                  {activeVaultItems.length > 5 && (
-                    <button onClick={() => setCurrentNav("rooms")} className="text-[var(--color-primary)] font-bold text-sm">
-                      Visa alla föremål
-                    </button>
-                  )}
-                </div>
-
-                {activeVaultItems.length === 0 ? (
-                  <div className="text-center py-10 bg-[var(--color-surface)] rounded-3xl border border-[var(--color-border)] p-6 space-y-3 shadow-card">
-                    <span className="text-4xl">📷</span>
-                    <h3 className="font-bold text-lg text-[var(--color-text)]">Börja med ett föremål</h3>
-                    <p className="text-[16px] text-[var(--color-text-soft)]">
-                      Ta ett foto på ett föremål eller en hel yta, så fyller vi i märke, modell och värde.
+              {/* Om valvet är tomt: Varmt och enkelt Onboarding-läge */}
+              {activeVaultItems.length === 0 ? (
+                <div className="space-y-5 pt-2">
+                  <div>
+                    <h1 className="text-[28px] font-extrabold text-[var(--color-text)] leading-tight">
+                      Välkommen till BoValvet!
+                    </h1>
+                    <p className="text-[16px] text-[var(--color-text-soft)] mt-1.5 leading-relaxed">
+                      Säkra hemmets värden, garantier och kvitton på några minuter.
                     </p>
+                  </div>
+
+                  <div className="bg-[var(--color-surface)] rounded-3xl border border-[var(--color-border)] p-6 text-center space-y-4 shadow-card">
+                    <div className="w-16 h-16 rounded-2xl bg-[var(--color-primary-soft)] text-[var(--color-primary)] flex items-center justify-center mx-auto text-3xl shadow-xs">
+                      📷
+                    </div>
+                    <div>
+                      <h2 className="text-[20px] font-extrabold text-[var(--color-text)]">
+                        Börja med att ta ett foto
+                      </h2>
+                      <p className="text-[15px] text-[var(--color-text-soft)] mt-1.5 leading-relaxed">
+                        Fota en soffa, din TV, ett smycke eller ett helt rum. Vår AI identifierar föremålen och räknar automatiskt ut värdet.
+                      </p>
+                    </div>
+
                     <button
                       type="button"
                       onClick={() => setShowRoomPickerScreen(true)}
-                      className="min-h-[52px] px-6 rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base inline-flex items-center gap-2"
+                      className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-extrabold text-base flex items-center justify-center gap-2.5 shadow-md active:scale-[.98] transition"
                     >
                       <Camera className="w-5 h-5" />
                       <span>Fota ditt första föremål</span>
                     </button>
                   </div>
-                ) : (
-                  <div className="space-y-2.5">
-                    {activeVaultItems.slice(0, 6).map((item) => (
-                      <div
-                        key={item.id}
-                        onClick={() => openEditItem(item)}
-                        className="bg-[var(--color-surface)] p-3 rounded-2xl border border-[var(--color-border)] shadow-card flex items-center gap-3 cursor-pointer active:scale-[.98] transition"
-                      >
-                        <div className="w-[72px] h-[72px] rounded-xl bg-[var(--color-primary-soft)] flex-shrink-0 overflow-hidden flex items-center justify-center text-2xl border border-[var(--color-border)]">
-                          {item.imageUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={item.imageUrl} alt={item.title} className="w-full h-full object-cover" />
-                          ) : (
-                            <span>{getRoomEmoji(item.room)}</span>
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <span className="text-[14px] text-[var(--color-text-soft)] block font-medium">{item.room}</span>
-                          <b className="text-base text-[var(--color-text)] block truncate">{item.title}</b>
-                          <span className="text-base font-extrabold text-[var(--color-text)]">
-                            {Number(item.estimated_replacement_cost_sek).toLocaleString("sv-SE")} kr
-                          </span>
-                        </div>
-                        <ChevronRight className="w-5 h-5 text-[var(--color-text-soft)] opacity-50 flex-shrink-0" />
+
+                  <div className="p-5 bg-[var(--color-primary-soft)] rounded-3xl border border-[var(--color-border)] space-y-3">
+                    <b className="text-[15px] text-[var(--color-primary)] block font-bold">
+                      Vad BoValvet hjälper dig med:
+                    </b>
+                    <div className="space-y-2 text-[14px] text-[var(--color-text)]">
+                      <div className="flex items-center gap-2.5">
+                        <Check className="w-4 h-4 text-emerald-700 flex-shrink-0" />
+                        <span>Koll på hemmets totala lösöresvärde</span>
                       </div>
-                    ))}
+                      <div className="flex items-center gap-2.5">
+                        <Check className="w-4 h-4 text-emerald-700 flex-shrink-0" />
+                        <span>Skydd mot underförsäkring om något händer</span>
+                      </div>
+                      <div className="flex items-center gap-2.5">
+                        <Check className="w-4 h-4 text-emerald-700 flex-shrink-0" />
+                        <span>Garantivakt som varnar innan reklamationsrätten går ut</span>
+                      </div>
+                    </div>
                   </div>
-                )}
-              </div>
+                </div>
+              ) : (
+                /* Om det finns föremål: Instrumentpanelen */
+                <div className="space-y-6">
+                  <div>
+                    <h1 className="text-[26px] font-extrabold text-[var(--color-text)]">
+                      Hej, {displayName || (sessionUser ? "där" : "gäst")}!
+                    </h1>
+                    <p className="text-[15px] text-[var(--color-text-soft)] mt-0.5 font-medium">
+                      Översikt för {selectedProperty?.name || "hemmet"}
+                    </p>
+                  </div>
+
+                  <div className="bg-gradient-to-br from-[var(--color-primary-soft)] to-[var(--color-surface)] rounded-3xl p-5 border border-[var(--color-border)] shadow-card space-y-4">
+                    <div>
+                      <span className="text-[14px] text-[var(--color-text-soft)] font-semibold block">
+                        Värdet på dina föremål
+                      </span>
+                      <div className="text-[40px] font-black tracking-tight text-[var(--color-text)] leading-none mt-1">
+                        {totalValuationSek.toLocaleString("sv-SE")} kr
+                      </div>
+                      <p className="text-[15px] text-[var(--color-text)] leading-snug mt-2">
+                        {formatItemsCount(activeVaultItems.length)} säkrade med foto och uppgifter
+                      </p>
+                    </div>
+
+                    <div className="p-3 bg-[var(--color-surface)]/80 rounded-2xl border border-[var(--color-border)] space-y-2">
+                      <div className="flex items-center justify-between text-[14px]">
+                        <span className="text-[var(--color-text-soft)] font-medium">
+                          Inventering: <strong>{startedRoomCount} av {allRooms.length} rum</strong>
+                        </span>
+                        {firstEmptyRoom && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveRoom(firstEmptyRoom);
+                              setShowRoomPickerScreen(true);
+                            }}
+                            className="text-[var(--color-primary)] font-extrabold flex items-center gap-1 hover:underline active:scale-95 transition"
+                          >
+                            <Camera className="w-3.5 h-3.5" />
+                            <span>Nästa: {firstEmptyRoom}</span>
+                          </button>
+                        )}
+                      </div>
+                      <div className="w-full bg-[var(--color-border)] rounded-full h-2 overflow-hidden">
+                        <div 
+                          className="h-full bg-[var(--color-primary)] rounded-full transition-all duration-500"
+                          style={{ width: `${Math.round((startedRoomCount / Math.max(allRooms.length, 1)) * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="pt-1 border-t border-[var(--color-border)] flex items-center justify-between text-[14px] text-[var(--color-text-soft)]">
+                      <span>Försäkringstak: {Number(selectedProperty?.coverage_limit_sek || 1000000).toLocaleString("sv-SE")} kr</span>
+                      <button onClick={() => setCurrentNav("insurance")} className="text-[var(--color-primary)] font-bold hover:underline">
+                        Se villkor & skydd
+                      </button>
+                    </div>
+                  </div>
+
+                  {expiringSoonItems.length > 0 && (
+                    <div 
+                      onClick={() => {
+                        setWarrantyFilter("expiring_soon");
+                        setCurrentNav("insurance");
+                      }}
+                      className="bg-[var(--color-warn-bg)] border border-[var(--color-border)] p-4 rounded-3xl cursor-pointer shadow-card flex items-center gap-3.5 active:scale-[.98] transition"
+                    >
+                      <Clock className="w-6 h-6 text-[var(--color-warn-text)] flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <b className="text-[16px] text-[var(--color-warn-text)] block font-bold">
+                          {expiringSoonItems.length} {expiringSoonItems.length === 1 ? "garanti" : "garantier"} löper ut snart!
+                        </b>
+                        <span className="text-[14px] text-[var(--color-text-soft)] block truncate">
+                          T.ex. {expiringSoonItems[0].title}. Kontrollera skicket innan tidsfristen går ut.
+                        </span>
+                      </div>
+                      <ChevronRight className="w-5 h-5 text-[var(--color-warn-text)] opacity-60 flex-shrink-0" />
+                    </div>
+                  )}
+
+                  <div className="space-y-3 pt-1">
+                    <div className="flex justify-between items-center">
+                      <h2 className="text-[20px] font-extrabold text-[var(--color-text)]">Senast tillagt</h2>
+                      {activeVaultItems.length > 5 && (
+                        <button onClick={() => setCurrentNav("rooms")} className="text-[var(--color-primary)] font-bold text-sm">
+                          Visa alla i Valvet
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="space-y-2.5">
+                      {activeVaultItems.slice(0, 6).map((item) => (
+                        <div
+                          key={item.id}
+                          onClick={() => openEditItem(item)}
+                          className="bg-[var(--color-surface)] p-3 rounded-2xl border border-[var(--color-border)] shadow-card flex items-center gap-3 cursor-pointer active:scale-[.98] transition"
+                        >
+                          <div className="w-[72px] h-[72px] rounded-xl bg-[var(--color-primary-soft)] flex-shrink-0 overflow-hidden flex items-center justify-center text-2xl border border-[var(--color-border)]">
+                            {item.imageUrl ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={item.imageUrl} alt={item.title} className="w-full h-full object-cover" />
+                            ) : (
+                              <span>{getRoomEmoji(item.room)}</span>
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <span className="text-[14px] text-[var(--color-text-soft)] block font-medium">{item.room}</span>
+                            <b className="text-base text-[var(--color-text)] block truncate">{item.title}</b>
+                            <span className="text-base font-extrabold text-[var(--color-text)]">
+                              {Number(item.estimated_replacement_cost_sek).toLocaleString("sv-SE")} kr
+                            </span>
+                          </div>
+                          <ChevronRight className="w-5 h-5 text-[var(--color-text-soft)] opacity-50 flex-shrink-0" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
-          {/* RUM-FLIKEN */}
+          {/* FLIKEN: VALVET (FÖRE DETTA "RUM") */}
           {!showRoomPickerScreen && !isAnalyzing && !result && multiResults.length === 0 && !editingItem && !showArchiveHub && currentNav === "rooms" && (
             <div className="space-y-4 animate-in fade-in">
               <div className="flex items-center justify-between pt-1">
-                <h1 className="text-[24px] font-extrabold text-[var(--color-text)]">Dina rum</h1>
+                <div>
+                  <h1 className="text-[24px] font-extrabold text-[var(--color-text)]">Ditt Valv</h1>
+                  <span className="text-sm text-[var(--color-text-soft)]">
+                    {formatItemsCount(activeVaultItems.length)} säkrade i {selectedProperty?.name || "hemmet"}
+                  </span>
+                </div>
+
                 <button
                   type="button"
                   onClick={() => {
@@ -2589,6 +2632,7 @@ export default function HomePage() {
                 </button>
               </div>
 
+              {/* Rumsfilter-knappar */}
               <div className="flex gap-2 overflow-x-auto -mx-5 px-5 pb-1 scrollbar-none">
                 <button
                   type="button"
@@ -3012,7 +3056,7 @@ export default function HomePage() {
                   onClick={() => setEditingItem(null)} 
                   className="text-[var(--color-primary)] font-bold text-sm flex items-center gap-1"
                 >
-                  ← Till rummet ({editingItem.room})
+                  ← Tillbaka till {editingItem.room}
                 </button>
                 <button 
                   onClick={() => {
@@ -3407,7 +3451,7 @@ export default function HomePage() {
                   }}
                   className="min-h-[52px] w-full rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] font-bold text-base flex items-center justify-center gap-2 hover:bg-[var(--color-bg)] transition active:scale-[.98]"
                 >
-                  <span>Se alla föremål i {savedSuccessInfo.room}</span>
+                  <span>Se föremålen i Valvet</span>
                 </button>
 
                 <button
@@ -3440,6 +3484,7 @@ export default function HomePage() {
                 <span className="text-[13px]">Hem</span>
               </button>
 
+              {/* FLIK 2: VALVET (FÖRE DETTA "RUM") */}
               <button
                 type="button"
                 onClick={() => setCurrentNav("rooms")}
@@ -3448,7 +3493,7 @@ export default function HomePage() {
                 }`}
               >
                 <LayoutGrid className="w-6 h-6" />
-                <span className="text-[13px]">Rum</span>
+                <span className="text-[13px]">Valvet</span>
               </button>
 
               <div className="w-[76px] relative flex justify-center">
