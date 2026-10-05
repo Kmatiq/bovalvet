@@ -2,11 +2,12 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const viewport: Viewport = {
-  themeColor: "#F9F5EF",
+  themeColor: "#2B574A",
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
+  viewportFit: "cover",
 };
 
 export const metadata: Metadata = {
@@ -17,10 +18,6 @@ export const metadata: Metadata = {
     capable: true,
     statusBarStyle: "default",
     title: "BoValvet",
-  },
-  icons: {
-    icon: "/icon.svg",
-    apple: "/icon.svg",
   },
   openGraph: {
     title: "BoValvet – Säkra hemmets värden",
@@ -38,7 +35,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="sv">
-      <body className="antialiased bg-[var(--color-bg)] text-[var(--color-text)]">{children}</body>
+      <body className="antialiased bg-[var(--color-bg)] text-[var(--color-text)]">
+        {children}
+      </body>
     </html>
   );
 }
