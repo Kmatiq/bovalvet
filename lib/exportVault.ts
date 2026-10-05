@@ -33,13 +33,26 @@ export interface PropertyMeta {
   deductible_sek?: number;
 }
 
+// Hjälpfunktion för att sortera föremål per rum och därefter namn
+function sortItemsByRoom(items: VaultExportItem[]): VaultExportItem[] {
+  return [...items].sort((a, b) => {
+    const roomA = a.room?.trim() || "Övrigt / Ospecificerat";
+    const roomB = b.room?.trim() || "Övrigt / Ospecificerat";
+    const roomComp = roomA.localeCompare(roomB, "sv");
+    if (roomComp !== 0) return roomComp;
+    return (a.title || "").localeCompare(b.title || "", "sv");
+  });
+}
+
 // -------------------------------------------------------------
 // 1. KALKYLARK (EXCEL / APPLE NUMBERS / GOOGLE SHEETS)
 // -------------------------------------------------------------
 export function exportToCsv(items: VaultExportItem[], filename = "bovalvet-inventering.csv") {
+  const sortedItems = sortItemsByRoom(items);
+
   const headers = [
-    "Föremål",
     "Rum",
+    "Föremål",
     "Kategori",
     "Märke",
     "Modell",
@@ -61,9 +74,9 @@ export function exportToCsv(items: VaultExportItem[], filename = "bovalvet-inven
     return `"${str}"`;
   };
 
-  const rows = items.map((i) => [
-    escapeCell(i.title),
+  const rows = sortedItems.map((i) => [
     escapeCell(i.room || "Ospecificerat"),
+    escapeCell(i.title),
     escapeCell(i.category || "Övrigt"),
     escapeCell(i.brand || ""),
     escapeCell(i.model || ""),
@@ -79,7 +92,6 @@ export function exportToCsv(items: VaultExportItem[], filename = "bovalvet-inven
     escapeCell(i.notes || "")
   ]);
 
-  // Semikolon och UTF-8 BOM (\uFEFF) gör att filen öppnas i prydliga kolumner med ÅÄÖ
   const csvContent = "\uFEFF" + [headers.join(";"), ...rows.map((r) => r.join(";"))].join("\r\n");
 
   const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -102,9 +114,10 @@ export function generateVaultPdf(
   totalValuationSek: number,
   property?: PropertyMeta | null
 ) {
+  const sortedItems = sortItemsByRoom(items);
   const doc = new jsPDF();
   const dateStr = new Date().toLocaleDateString("sv-SE");
-  const totalMarketValuation = items.reduce((sum, i) => sum + (Number(i.market_value_sek) || 0), 0);
+  const totalMarketValuation = sortedItems.reduce((sum, i) => sum + (Number(i.market_value_sek) || 0), 0);
 
   // Sidhuvud
   doc.setFillColor(13, 19, 17);
@@ -118,7 +131,7 @@ export function generateVaultPdf(
   doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(165, 180, 175);
-  doc.text("Inventarieförteckning och lösöresunderlag", 15, 28);
+  doc.text("Inventarieförteckning och lösöresunderlag (Sorterat per rum)", 15, 28);
   doc.text(`Datum: ${dateStr}`, 195, 28, { align: "right" });
 
   // Bostads- och ägaruppgifter
@@ -151,15 +164,15 @@ export function generateVaultPdf(
 
   doc.setFontSize(13);
   doc.setTextColor(15, 23, 42);
-  doc.text(`${items.length} föremål`, 22, 85);
+  doc.text(`${sortedItems.length} föremål`, 22, 85);
   doc.text(`${totalValuationSek.toLocaleString("sv-SE")} kr`, 80, 85);
   doc.setTextColor(45, 138, 114);
   doc.text(`${totalMarketValuation.toLocaleString("sv-SE")} kr`, 135, 85);
 
-  const tableData = items.map((i, idx) => [
+  const tableData = sortedItems.map((i, idx) => [
     idx + 1,
-    i.title,
     i.room || "Ospec.",
+    i.title,
     i.brand ? `${i.brand} ${i.model || ""}`.trim() : "—",
     i.receipt_path ? "Ja ✓" : "Nej",
     i.serial_number || "—",
@@ -168,7 +181,7 @@ export function generateVaultPdf(
 
   autoTable(doc, {
     startY: 96,
-    head: [["#", "Föremål", "Rum", "Märke / Modell", "Kvitto", "Serienummer", "Nypris"]],
+    head: [["#", "Rum", "Föremål", "Märke / Modell", "Kvitto", "Serienummer", "Nypris"]],
     body: tableData,
     theme: "striped",
     headStyles: {
@@ -184,8 +197,8 @@ export function generateVaultPdf(
     },
     columnStyles: {
       0: { cellWidth: 8, halign: "center" },
-      1: { cellWidth: 50 },
-      2: { cellWidth: 26 },
+      1: { cellWidth: 28, fontStyle: "bold" },
+      2: { cellWidth: 48 },
       3: { cellWidth: 38 },
       4: { cellWidth: 16, halign: "center" },
       5: { cellWidth: 22 },
@@ -218,13 +231,13 @@ export function generateIncidentPdf(options: {
   items: VaultExportItem[];
 }) {
   const { incidentType, incidentDate, policeReportNumber, property, userEmail, items } = options;
+  const sortedItems = sortItemsByRoom(items);
   const doc = new jsPDF();
   const dateStr = new Date().toLocaleDateString("sv-SE");
 
-  const totalCost = items.reduce((sum, i) => sum + (Number(i.estimated_replacement_cost_sek) || 0), 0);
-  const totalMarket = items.reduce((sum, i) => sum + (Number(i.market_value_sek) || 0), 0);
+  const totalCost = sortedItems.reduce((sum, i) => sum + (Number(i.estimated_replacement_cost_sek) || 0), 0);
+  const totalMarket = sortedItems.reduce((sum, i) => sum + (Number(i.market_value_sek) || 0), 0);
 
-  // Topp-banner för skada
   doc.setFillColor(185, 28, 28);
   doc.rect(0, 0, 210, 36, "F");
 
@@ -254,7 +267,7 @@ export function generateIncidentPdf(options: {
   doc.text(`Skadetyp: ${incidentType}`, 20, 56);
   doc.text(`Skadedatum: ${incidentDate}`, 20, 62);
   doc.text(`Polisanmälningsnr: ${policeReportNumber || "Ej tillämpligt"}`, 20, 68);
-  doc.text(`Drabbade föremål: ${items.length} st`, 20, 74);
+  doc.text(`Drabbade föremål: ${sortedItems.length} st`, 20, 74);
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
@@ -282,10 +295,10 @@ export function generateIncidentPdf(options: {
   doc.setTextColor(30, 41, 59);
   doc.text(`${totalMarket.toLocaleString("sv-SE")} kr`, 110, 100);
 
-  const tableData = items.map((i, idx) => [
+  const tableData = sortedItems.map((i, idx) => [
     idx + 1,
-    i.title,
     i.room || "Ospec.",
+    i.title,
     `${i.brand || ""} ${i.model || ""}`.trim() || "—",
     i.serial_number || "—",
     i.purchase_date || "—",
@@ -295,7 +308,7 @@ export function generateIncidentPdf(options: {
 
   autoTable(doc, {
     startY: 108,
-    head: [["#", "Drabbat föremål", "Rum", "Märke / Modell", "Serienr", "Inköpt", "Kvitto", "Nypris"]],
+    head: [["#", "Rum", "Drabbat föremål", "Märke / Modell", "Serienr", "Inköpt", "Kvitto", "Nypris"]],
     body: tableData,
     theme: "grid",
     headStyles: {
@@ -311,8 +324,8 @@ export function generateIncidentPdf(options: {
     },
     columnStyles: {
       0: { cellWidth: 8, halign: "center" },
-      1: { cellWidth: 44 },
-      2: { cellWidth: 22 },
+      1: { cellWidth: 22, fontStyle: "bold" },
+      2: { cellWidth: 44 },
       3: { cellWidth: 32 },
       4: { cellWidth: 20 },
       5: { cellWidth: 18 },
@@ -323,7 +336,6 @@ export function generateIncidentPdf(options: {
 
   const finalY = (doc as any).lastAutoTable.finalY || 200;
 
-  // Underskrift
   const signY = Math.min(finalY + 14, 245);
   doc.setTextColor(71, 85, 105);
   doc.setFontSize(8.5);
