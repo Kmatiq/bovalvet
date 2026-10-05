@@ -55,7 +55,8 @@ import {
   Layers, 
   MousePointerClick, 
   Download, 
-  Share2 
+  Share2,
+  SlidersHorizontal 
 } from "lucide-react";
 import { sanitizeAndCompressImage } from "@/lib/sanitizeImage";
 import { supabase } from "@/lib/supabaseClient";
@@ -120,6 +121,7 @@ interface ItemAnalysisResult {
   serial_number_hint: string;
   confidence: number;
   box_2d?: [number, number, number, number];
+  previewCropUrl?: string;
 }
 
 interface VaultItem {
@@ -295,6 +297,69 @@ async function cropImageFromBox(
   });
 }
 
+async function cropImageToDataUrl(
+  imageSrc: string,
+  box: [number, number, number, number],
+  paddingPercent: number = 0.25
+): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const [ymin, xmin, ymax, xmax] = box;
+      const origW = img.naturalWidth;
+      const origH = img.naturalHeight;
+
+      let x1 = (xmin / 1000) * origW;
+      let y1 = (ymin / 1000) * origH;
+      let x2 = (xmax / 1000) * origW;
+      let y2 = (ymax / 1000) * origH;
+
+      let w = x2 - x1;
+      let h = y2 - y1;
+
+      const padX = Math.max(w * paddingPercent, 40);
+      const padY = Math.max(h * paddingPercent, 40);
+
+      x1 = Math.max(0, x1 - padX);
+      y1 = Math.max(0, y1 - padY);
+      x2 = Math.min(origW, x2 + padX);
+      y2 = Math.min(origH, y2 + padY);
+
+      w = x2 - x1;
+      h = y2 - y1;
+
+      const minDimension = 280;
+      if (w < minDimension && origW >= minDimension) {
+        const diff = (minDimension - w) / 2;
+        x1 = Math.max(0, x1 - diff);
+        x2 = Math.min(origW, x2 + diff);
+        w = x2 - x1;
+      }
+      if (h < minDimension && origH >= minDimension) {
+        const diff = (minDimension - h) / 2;
+        y1 = Math.max(0, y1 - diff);
+        y2 = Math.min(origH, y2 + diff);
+        h = y2 - y1;
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(w));
+      canvas.height = Math.max(1, Math.round(h));
+      const ctx = canvas.getContext("2d");
+
+      if (!ctx) return resolve(imageSrc);
+
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, x1, y1, w, h, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL("image/jpeg", 0.88));
+    };
+    img.onerror = () => resolve(imageSrc);
+    img.src = imageSrc;
+  });
+}
+
 const FREE_ITEM_LIMIT = 20;
 
 export default function HomePage() {
@@ -339,13 +404,50 @@ export default function HomePage() {
   const [result, setResult] = useState<ItemAnalysisResult | null>(null);
   const [multiResults, setMultiResults] = useState<ItemAnalysisResult[]>([]);
   const [selectedMultiIndices, setSelectedMultiIndices] = useState<number[]>([]);
+  const [multiReviewStep, setMultiReviewStep] = useState<number | null>(null);
+
+  const removeMultiItem = (indexToRemove: number) => {
+    setMultiResults((prev) => {
+      const updated = prev.filter((_, idx) => idx !== indexToRemove);
+      if (updated.length === 0) {
+        setPreviewUrl(null);
+        setBase64ForSave(null);
+        setMultiReviewStep(null);
+      } else if (multiReviewStep !== null && multiReviewStep >= updated.length) {
+        setMultiReviewStep(updated.length - 1);
+      }
+      return updated;
+    });
+    setSelectedMultiIndices((prev) =>
+      prev
+        .filter((i) => i !== indexToRemove)
+        .map((i) => (i > indexToRemove ? i - 1 : i))
+    );
+  };
+
+  const updateMultiItemField = (
+    index: number,
+    field: "title" | "estimated_replacement_cost_sek",
+    value: string | number
+  ) => {
+    setMultiResults((prev) =>
+      prev.map((item, idx) => (idx === index ? { ...item, [field]: value } : item))
+    );
+  };
 
   const [totalValuationSek, setTotalValuationSek] = useState<number>(0);
   const [vaultItems, setVaultItems] = useState<VaultItem[]>([]);
   const [selectedRoomFilter, setSelectedRoomFilter] = useState<string>("Alla");
 
   const [editingItem, setEditingItem] = useState<VaultItem | null>(null);
+  const [showMoreItemDetails, setShowMoreItemDetails] = useState<boolean>(false);
   const [activeImageIndex, setActiveImageIndex] = useState<number>(0);
+
+  const openEditItem = (item: VaultItem) => {
+    setEditingItem({ ...item });
+    setActiveImageIndex(0);
+    setShowMoreItemDetails(Boolean(item.brand || item.model || item.serial_number || item.notes || item.purchase_store));
+  };
   const [isUpdating, setIsUpdating] = useState(false);
   const [isUploadingItemPhoto, setIsUploadingItemPhoto] = useState(false);
   const [isAnalyzingReceipt, setIsAnalyzingReceipt] = useState(false);
@@ -1193,13 +1295,37 @@ export default function HomePage() {
         }
         
         if (detected.length === 1) {
-          setResult(detected[0]);
+          let single = detected[0];
+          if (single.box_2d && single.box_2d.length === 4 && processed.previewUrl) {
+            try {
+              const cropUrl = await cropImageToDataUrl(processed.previewUrl, single.box_2d);
+              single = { ...single, previewCropUrl: cropUrl };
+            } catch (cropErr) {
+              console.warn("Kunde inte beskära enskilt föremål:", cropErr);
+            }
+          }
+          setResult(single);
           setMultiResults([]);
           setSelectedMultiIndices([0]);
+          setMultiReviewStep(null);
         } else if (detected.length > 1) {
-          setMultiResults(detected);
-          setSelectedMultiIndices(detected.map((_, idx) => idx));
-          showToast(`Upptäckte ${detected.length} föremål på bilden!`);
+          const withCrops = await Promise.all(
+            detected.map(async (item) => {
+              if (item.box_2d && item.box_2d.length === 4 && processed.previewUrl) {
+                try {
+                  const cropUrl = await cropImageToDataUrl(processed.previewUrl, item.box_2d);
+                  return { ...item, previewCropUrl: cropUrl };
+                } catch {
+                  return item;
+                }
+              }
+              return item;
+            })
+          );
+          setMultiResults(withCrops);
+          setSelectedMultiIndices(withCrops.map((_, idx) => idx));
+          setMultiReviewStep(null);
+          showToast(`Hittade ${withCrops.length} föremål i ${activeRoom}!`);
         }
       } else {
         alert(response.error || "Kunde inte tolka föremålet.");
@@ -1291,8 +1417,7 @@ export default function HomePage() {
           imageUrls: [urlData?.signedUrl || ""],
           imageUrl: urlData?.signedUrl || "",
         };
-        setEditingItem(savedItemWithUrl);
-        setActiveImageIndex(0);
+        openEditItem(savedItemWithUrl);
       }
 
       showToast(`Sparat i ${activeRoom} ✓`);
@@ -1303,8 +1428,8 @@ export default function HomePage() {
     }
   };
 
-  const executeSaveMultiItems = async (userId: string) => {
-    const itemsToSave = multiResults.filter((_, idx) => selectedMultiIndices.includes(idx));
+  const executeSaveMultiItems = async (userId?: string) => {
+    const itemsToSave = multiResults;
     if (itemsToSave.length === 0 || !base64ForSave || !previewUrl) return;
 
     if (!userId) {
@@ -1343,7 +1468,27 @@ export default function HomePage() {
         const item = itemsToSave[i];
         let itemCroppedFileName = overviewFileName;
 
-        if (item.box_2d && item.box_2d.length === 4) {
+        if (item.previewCropUrl && item.previewCropUrl.startsWith("data:image/")) {
+          try {
+            const byteString = atob(item.previewCropUrl.split(",")[1]);
+            const ab = new ArrayBuffer(byteString.length);
+            const ia = new Uint8Array(ab);
+            for (let b = 0; b < byteString.length; b++) {
+              ia[b] = byteString.charCodeAt(b);
+            }
+            const croppedBlob = new Blob([ab], { type: "image/jpeg" });
+            const cropName = `${userId}/crop-${Date.now()}-${i}-${Math.random().toString(36).substring(7)}.jpg`;
+            const { error: cropErr } = await supabase.storage
+              .from("item-photos")
+              .upload(cropName, croppedBlob, { contentType: "image/jpeg", upsert: true });
+
+            if (!cropErr) {
+              itemCroppedFileName = cropName;
+            }
+          } catch (cropErr) {
+            console.warn("Kunde inte ladda upp beskuren bild:", cropErr);
+          }
+        } else if (item.box_2d && item.box_2d.length === 4) {
           try {
             const croppedBlob = await cropImageFromBox(previewUrl, item.box_2d);
             const cropName = `${userId}/crop-${Date.now()}-${i}-${Math.random().toString(36).substring(7)}.jpg`;
@@ -1391,6 +1536,7 @@ export default function HomePage() {
 
       setMultiResults([]);
       setSelectedMultiIndices([]);
+      setMultiReviewStep(null);
       setPreviewUrl(null);
       setBase64ForSave(null);
 
@@ -1467,7 +1613,7 @@ export default function HomePage() {
           const { data: uData } = await supabase.storage.from("item-photos").createSignedUrl(uploadedFileName, 3600);
           signed = uData?.signedUrl || "";
         }
-        setEditingItem({
+        openEditItem({
           ...insertedData,
           image_paths: uploadedFileName ? [uploadedFileName] : [],
           imageUrls: signed ? [signed] : [],
@@ -1803,138 +1949,203 @@ export default function HomePage() {
             </div>
           )}
 
-          {multiResults.length > 0 && !isAnalyzing && (
+          {multiResults.length > 0 && !isAnalyzing && multiReviewStep === null && (
             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-200">
               <div className="flex items-center justify-between">
                 <button 
+                  type="button"
                   onClick={() => {
                     setMultiResults([]);
                     setSelectedMultiIndices([]);
                     setPreviewUrl(null);
                     setBase64ForSave(null);
                   }} 
-                  className="min-h-[44px] flex items-center gap-1 text-[var(--color-primary)] font-bold text-base -ml-2"
+                  className="min-h-[44px] flex items-center gap-1 text-[var(--color-primary)] font-bold text-base -ml-1"
                 >
                   ← Fota om
                 </button>
-                <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)] flex items-center gap-1.5">
-                  <MousePointerClick className="w-3.5 h-3.5" />
-                  <span>Klicka på bilden för att välja</span>
-                </span>
+
+                <button
+                  type="button"
+                  onClick={() => setShowRoomPickerScreen(true)}
+                  className="min-h-[40px] px-3.5 rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)] font-semibold text-sm flex items-center gap-1.5 hover:opacity-90 transition active:scale-95"
+                >
+                  <MapPin className="w-3.5 h-3.5" />
+                  <span>Rum: <strong>{activeRoom}</strong></span>
+                </button>
               </div>
 
               <div>
                 <h1 className="text-[22px] font-extrabold text-[var(--color-text)]">
-                  Hittade {multiResults.length} föremål
+                  Hittade {multiResults.length} föremål i {activeRoom}
                 </h1>
                 <p className="text-sm text-[var(--color-text-soft)] mt-0.5">
-                  Tryck på markörerna på fotot för att välja vad du vill spara i <strong>{activeRoom}</strong>.
+                  Uppskattat sammanlagt nypris: <strong className="text-[var(--color-text)] font-extrabold">{multiResults.reduce((sum, item) => sum + (Number(item.estimated_replacement_cost_sek) || 0), 0).toLocaleString("sv-SE")} kr</strong>
                 </p>
               </div>
 
               {previewUrl && (
-                <div className="relative rounded-3xl overflow-hidden bg-black border border-[var(--color-border)] shadow-md select-none">
+                <div className="relative rounded-3xl overflow-hidden bg-black/5 border border-[var(--color-border)] shadow-xs select-none">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={previewUrl} alt="Översiktsbild" className="w-full h-auto max-h-[380px] object-contain block mx-auto" />
-                  
-                  {multiResults.map((item, idx) => {
-                    if (!item.box_2d || item.box_2d.length < 4) return null;
-                    const [ymin, xmin, ymax, xmax] = item.box_2d;
-                    const isSelected = selectedMultiIndices.includes(idx);
-                    
-                    const top = `${(ymin / 1000) * 100}%`;
-                    const left = `${(xmin / 1000) * 100}%`;
-                    const width = `${Math.max(12, ((xmax - xmin) / 1000) * 100)}%`;
-                    const height = `${Math.max(10, ((ymax - ymin) / 1000) * 100)}%`;
-
-                    return (
-                      <div
-                        key={idx}
-                        onClick={() => toggleMultiItemSelection(idx)}
-                        style={{ top, left, width, height }}
-                        className={`absolute cursor-pointer border-2 transition-all duration-200 rounded-2xl flex items-start justify-start p-1.5 ${
-                          isSelected 
-                            ? "border-[var(--color-primary)] bg-[var(--color-primary)]/20 shadow-lg ring-2 ring-white/60" 
-                            : "border-white/60 bg-black/35 opacity-60 hover:opacity-90"
-                        }`}
-                      >
-                        <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-black shadow-md transition ${
-                          isSelected ? "bg-[var(--color-primary)] text-white" : "bg-black/80 text-white"
-                        }`}>
-                          {idx + 1}
-                        </span>
-                      </div>
-                    );
-                  })}
+                  <img src={previewUrl} alt="Översiktsbild" className="w-full h-auto max-h-[200px] object-cover block mx-auto" />
+                  <div className="absolute bottom-2.5 right-2.5 bg-black/60 backdrop-blur-md px-3 py-1 rounded-full text-xs font-semibold text-white">
+                    Översiktsfoto
+                  </div>
                 </div>
               )}
 
               <div className="space-y-2.5 pt-1">
-                {multiResults.map((item, idx) => {
-                  const isChecked = selectedMultiIndices.includes(idx);
-                  return (
+                {multiResults.map((item, idx) => (
+                  <div 
+                    key={idx}
+                    className="p-3 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] shadow-card flex items-center justify-between gap-3 transition"
+                  >
                     <div 
-                      key={idx}
-                      onClick={() => toggleMultiItemSelection(idx)}
-                      className={`p-3.5 rounded-2xl border transition cursor-pointer flex items-center justify-between gap-3 ${
-                        isChecked 
-                          ? "bg-[var(--color-surface)] border-[var(--color-primary)] shadow-card" 
-                          : "bg-[var(--color-bg)] border-[var(--color-border)] opacity-60"
-                      }`}
+                      onClick={() => setMultiReviewStep(idx)}
+                      className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer"
                     >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <span className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs font-black flex-shrink-0 ${
-                          isChecked ? "bg-[var(--color-primary)] text-white" : "bg-[var(--color-border)] text-[var(--color-text-soft)]"
-                        }`}>
-                          {idx + 1}
-                        </span>
-                        <div className="min-w-0">
-                          <b className="text-base text-[var(--color-text)] block truncate">{item.title}</b>
-                          <span className="text-xs text-[var(--color-text-soft)] block truncate">
-                            {item.brand ? `${item.brand} · ` : ""}{item.condition}
-                          </span>
-                        </div>
+                      <div className="w-14 h-14 rounded-xl bg-[var(--color-primary-soft)] border border-[var(--color-border)] overflow-hidden flex-shrink-0 flex items-center justify-center">
+                        {item.previewCropUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={item.previewCropUrl} alt={item.title} className="w-full h-full object-cover" />
+                        ) : (
+                          <span className="text-xl">{STANDARD_ROOMS[activeRoom] || "📦"}</span>
+                        )}
                       </div>
 
-                      <div className="text-right flex-shrink-0">
-                        <span className="text-base font-black text-[var(--color-text)] block">
+                      <div className="min-w-0 flex-1">
+                        <b className="text-base text-[var(--color-text)] block truncate">{item.title}</b>
+                        <span className="text-sm font-extrabold text-[var(--color-text)] block">
                           {Number(item.estimated_replacement_cost_sek).toLocaleString("sv-SE")} kr
-                        </span>
-                        <span className="text-[11px] font-bold text-[var(--color-primary)]">
-                          Beg: {Number(item.market_value_sek).toLocaleString("sv-SE")} kr
                         </span>
                       </div>
                     </div>
-                  );
-                })}
+
+                    <button
+                      type="button"
+                      onClick={() => removeMultiItem(idx)}
+                      className="w-10 h-10 rounded-xl flex items-center justify-center text-[var(--color-text-soft)] hover:text-rose-600 hover:bg-rose-50 transition active:scale-95 flex-shrink-0"
+                      title="Ta bort föremål"
+                      aria-label={`Ta bort ${item.title}`}
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                ))}
               </div>
 
-              <div className="pt-2 space-y-2">
+              <div className="pt-2 space-y-2.5">
                 <button
                   type="button"
                   onClick={() => executeSaveMultiItems(sessionUser?.id)}
-                  disabled={isSaving || selectedMultiIndices.length === 0}
+                  disabled={isSaving || multiResults.length === 0}
                   className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98] disabled:opacity-50"
                 >
                   {isSaving ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
                   ) : (
                     <span>
-                      {selectedMultiIndices.length === 0 
-                        ? "Välj minst ett föremål att spara" 
-                        : sessionUser 
-                          ? `Spara ${selectedMultiIndices.length} föremål i ${activeRoom}` 
-                          : "Logga in för att spara dina föremål"}
+                      {sessionUser 
+                        ? `Spara alla ${multiResults.length} föremål i ${activeRoom}` 
+                        : "Logga in och spara alla föremål"}
                     </span>
                   )}
                 </button>
 
                 <button
                   type="button"
+                  onClick={() => setMultiReviewStep(0)}
+                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] font-bold text-base text-[var(--color-text)] flex items-center justify-center gap-2 shadow-2xs hover:bg-[var(--color-primary-soft)] transition"
+                >
+                  <span>Granska ett och ett (1 av {multiResults.length}) →</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => cameraInputRef.current?.click()}
-                  className="min-h-[44px] w-full text-[var(--color-text-soft)] text-base font-semibold"
+                  className="min-h-[44px] w-full text-[var(--color-text-soft)] text-base font-semibold hover:text-[var(--color-text)] transition"
                 >
                   Fota om
+                </button>
+              </div>
+            </div>
+          )}
+
+          {multiResults.length > 0 && !isAnalyzing && multiReviewStep !== null && (
+            <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-200">
+              <div className="flex items-center justify-between">
+                <button 
+                  type="button"
+                  onClick={() => setMultiReviewStep(null)} 
+                  className="min-h-[44px] flex items-center gap-1 text-[var(--color-primary)] font-bold text-base -ml-1"
+                >
+                  ← Tillbaka till översikten
+                </button>
+                <span className="text-sm font-bold px-3 py-1 rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
+                  Föremål {multiReviewStep + 1} av {multiResults.length}
+                </span>
+              </div>
+
+              <div className="relative h-60 rounded-3xl overflow-hidden bg-[var(--color-surface)] border border-[var(--color-border)] shadow-xs select-none">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img 
+                  src={multiResults[multiReviewStep]?.previewCropUrl || previewUrl || ""} 
+                  alt={multiResults[multiReviewStep]?.title || "Föremål"} 
+                  className="w-full h-full object-cover" 
+                />
+                <div className="absolute bottom-3 left-3 bg-white/95 backdrop-blur-md px-3.5 py-1.5 rounded-full shadow-xs border border-stone-200 text-slate-800 text-sm font-semibold">
+                  Placeras i: <strong>{activeRoom}</strong>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="font-semibold text-[var(--color-text-soft)] block mb-1.5 text-sm">Vad är detta för föremål?</label>
+                  <input 
+                    type="text" 
+                    value={multiResults[multiReviewStep]?.title || ""} 
+                    onChange={(e) => updateMultiItemField(multiReviewStep, "title", e.target.value)}
+                    className="w-full min-h-[52px] px-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] font-bold text-lg text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-semibold text-[var(--color-text-soft)] block mb-1.5 text-sm">Nypris idag (SEK)</label>
+                  <input 
+                    type="number" 
+                    value={multiResults[multiReviewStep]?.estimated_replacement_cost_sek || ""} 
+                    onChange={(e) => updateMultiItemField(multiReviewStep, "estimated_replacement_cost_sek", Number(e.target.value))}
+                    className="w-full min-h-[52px] px-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] font-extrabold text-lg text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 space-y-2.5">
+                {multiReviewStep < multiResults.length - 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => setMultiReviewStep(multiReviewStep + 1)}
+                    className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98]"
+                  >
+                    <span>Godkänn & Nästa ({multiReviewStep + 2} av {multiResults.length}) →</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => executeSaveMultiItems(sessionUser?.id)}
+                    disabled={isSaving}
+                    className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98]"
+                  >
+                    {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <span>Spara alla i {activeRoom} ✓</span>}
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => removeMultiItem(multiReviewStep)}
+                  className="min-h-[48px] w-full text-rose-600 font-semibold text-base hover:bg-rose-50 rounded-2xl transition"
+                >
+                  Ta bort detta föremål
                 </button>
               </div>
             </div>
@@ -1943,77 +2154,75 @@ export default function HomePage() {
           {result && !isAnalyzing && multiResults.length === 0 && (
             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-200">
               <button 
+                type="button"
                 onClick={() => {
                   setResult(null);
                   setPreviewUrl(null);
                   setBase64ForSave(null);
                 }} 
-                className="min-h-[44px] flex items-center gap-1 text-[var(--color-primary)] font-bold text-base -ml-2"
+                className="min-h-[44px] flex items-center gap-1 text-[var(--color-primary)] font-bold text-base -ml-1"
               >
                 ← Fota om
               </button>
 
-              <div className="relative h-60 rounded-3xl overflow-hidden bg-[var(--color-surface)] border border-[var(--color-border)] shadow-xs select-none">
+              <div className="relative h-64 rounded-3xl overflow-hidden bg-[var(--color-surface)] border border-[var(--color-border)] shadow-xs select-none">
                 {previewUrl && (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={previewUrl} alt={result.title} className="w-full h-full object-cover" />
-                )}
-
-                {result.box_2d && result.box_2d.length >= 4 && (
-                  <div 
-                    style={{
-                      top: `${(result.box_2d[0] / 1000) * 100}%`,
-                      left: `${(result.box_2d[1] / 1000) * 100}%`,
-                      width: `${Math.max(15, ((result.box_2d[3] - result.box_2d[1]) / 1000) * 100)}%`,
-                      height: `${Math.max(12, ((result.box_2d[2] - result.box_2d[0]) / 1000) * 100)}%`,
-                    }}
-                    className="absolute border-2 border-[var(--color-primary)] bg-[var(--color-primary)]/15 rounded-2xl pointer-events-none ring-2 ring-white/50"
-                  />
+                  <img src={result.previewCropUrl || previewUrl} alt={result.title} className="w-full h-full object-cover" />
                 )}
 
                 <div className="absolute bottom-3 left-3 bg-white/95 backdrop-blur-md px-3.5 py-1.5 rounded-full shadow-xs border border-stone-200 flex items-center gap-1.5 text-slate-800">
                   <Check className="w-4 h-4 text-emerald-600" />
-                  <span className="text-[15px] font-semibold">{Math.round(result.confidence * 100)} % säker</span>
+                  <span className="text-sm font-semibold">{Math.round(result.confidence * 100)} % säker</span>
                 </div>
               </div>
 
               <div>
+                <label className="font-semibold text-[var(--color-text-soft)] block mb-1.5 text-sm">Vad är detta för föremål?</label>
                 <input 
                   type="text" 
                   value={result.title} 
                   onChange={(e) => setResult({ ...result, title: e.target.value })}
-                  className="w-full min-h-[52px] px-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] font-bold text-xl text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+                  className="w-full min-h-[52px] px-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] font-bold text-lg text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
                 />
-                <p className="text-[15px] text-[var(--color-text-soft)] mt-1.5 font-medium">
-                  {result.brand} · {result.model}
-                </p>
+                {(result.brand || result.model) && (
+                  <p className="text-sm text-[var(--color-text-soft)] mt-1.5 font-medium">
+                    {[result.brand, result.model].filter(Boolean).join(" · ")}
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-[var(--color-surface)] p-3.5 rounded-2xl border border-[var(--color-border)] shadow-card">
-                  <span className="text-[15px] text-[var(--color-text-soft)] block font-medium">Nypris idag</span>
-                  <span className="text-[22px] font-black text-[var(--color-text)]">
-                    {result.estimated_replacement_cost_sek.toLocaleString("sv-SE")} kr
-                  </span>
+                  <span className="text-sm text-[var(--color-text-soft)] block font-medium">Nypris idag</span>
+                  <input
+                    type="number"
+                    value={result.estimated_replacement_cost_sek}
+                    onChange={(e) => setResult({ ...result, estimated_replacement_cost_sek: Number(e.target.value) })}
+                    className="w-full bg-transparent font-black text-xl text-[var(--color-text)] focus:outline-none border-b border-transparent focus:border-[var(--color-primary)] mt-1"
+                  />
                 </div>
                 <div className="bg-[var(--color-surface)] p-3.5 rounded-2xl border border-[var(--color-border)] shadow-card">
-                  <span className="text-[15px] text-[var(--color-text-soft)] block font-medium">Värde begagnat</span>
-                  <span className="text-[22px] font-black text-[var(--color-primary)]">
-                    {result.market_value_sek.toLocaleString("sv-SE")} kr
-                  </span>
+                  <span className="text-sm text-[var(--color-text-soft)] block font-medium">Värde begagnat</span>
+                  <input
+                    type="number"
+                    value={result.market_value_sek}
+                    onChange={(e) => setResult({ ...result, market_value_sek: Number(e.target.value) })}
+                    className="w-full bg-transparent font-black text-xl text-[var(--color-primary)] focus:outline-none border-b border-transparent focus:border-[var(--color-primary)] mt-1"
+                  />
                 </div>
               </div>
 
               <button
                 type="button"
                 onClick={() => setShowRoomPickerScreen(true)}
-                className="w-full min-h-[56px] px-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] flex items-center justify-between font-semibold text-base text-[var(--color-text)]"
+                className="w-full min-h-[56px] px-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] flex items-center justify-between font-semibold text-base text-[var(--color-text)] hover:bg-[var(--color-primary-soft)] transition"
               >
                 <span>Placering: <strong>{activeRoom}</strong></span>
                 <span className="text-[var(--color-primary)] font-bold">Ändra</span>
               </button>
 
-              <div className="pt-2 space-y-2">
+              <div className="pt-2 space-y-2.5">
                 <button
                   type="button"
                   onClick={() => executeSaveAiItem(sessionUser?.id)}
@@ -2029,7 +2238,7 @@ export default function HomePage() {
                 <button
                   type="button"
                   onClick={() => cameraInputRef.current?.click()}
-                  className="min-h-[44px] w-full text-[var(--color-text-soft)] text-base font-semibold"
+                  className="min-h-[44px] w-full text-[var(--color-text-soft)] text-base font-semibold hover:text-[var(--color-text)] transition"
                 >
                   Fota om
                 </button>
@@ -2182,10 +2391,7 @@ export default function HomePage() {
                     {activeVaultItems.slice(0, 5).map((item) => (
                       <div
                         key={item.id}
-                        onClick={() => {
-                          setEditingItem({ ...item });
-                          setActiveImageIndex(0);
-                        }}
+                        onClick={() => openEditItem(item)}
                         className="bg-[var(--color-surface)] p-3 rounded-2xl border border-[var(--color-border)] shadow-card flex items-center gap-3 cursor-pointer active:scale-[.98] transition"
                       >
                         <div className="w-[72px] h-[72px] rounded-xl bg-[var(--color-primary-soft)] flex-shrink-0 overflow-hidden flex items-center justify-center text-2xl border border-[var(--color-border)]">
@@ -2273,10 +2479,7 @@ export default function HomePage() {
                     return (
                       <div
                         key={item.id}
-                        onClick={() => {
-                          setEditingItem({ ...item });
-                          setActiveImageIndex(0);
-                        }}
+                        onClick={() => openEditItem(item)}
                         className="bg-[var(--color-surface)] p-3 rounded-2xl border border-[var(--color-border)] shadow-card flex items-center gap-3 cursor-pointer active:scale-[.98] transition"
                       >
                         <div className="w-[72px] h-[72px] rounded-xl bg-[var(--color-primary-soft)] flex-shrink-0 overflow-hidden flex items-center justify-center text-2xl border border-[var(--color-border)]">
@@ -2395,10 +2598,7 @@ export default function HomePage() {
                       return (
                         <div
                           key={item.id}
-                          onClick={() => {
-                            setEditingItem({ ...item });
-                            setActiveImageIndex(0);
-                          }}
+                          onClick={() => openEditItem(item)}
                           className={`p-4 rounded-2xl border bg-[var(--color-surface)] shadow-card cursor-pointer active:scale-[.98] transition space-y-2 ${
                             s.status === "expiring_soon" ? "border-amber-400 bg-amber-50/20" : "border-[var(--color-border)]"
                           }`}
@@ -2715,9 +2915,9 @@ export default function HomePage() {
                 </div>
               </div>
 
-              <form onSubmit={handleSaveItemUpdates} className="space-y-4 text-sm">
+              <form onSubmit={handleSaveItemUpdates} className="space-y-4">
                 <div>
-                  <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Benämning</label>
+                  <label className="font-semibold text-[var(--color-text-soft)] block mb-1.5 text-sm">Benämning</label>
                   <input
                     type="text"
                     required
@@ -2728,7 +2928,7 @@ export default function HomePage() {
                 </div>
 
                 <div>
-                  <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Rum</label>
+                  <label className="font-semibold text-[var(--color-text-soft)] block mb-1.5 text-sm">Rum</label>
                   <select
                     value={editingItem.room || "Vardagsrum"}
                     onChange={(e) => setEditingItem({ ...editingItem, room: e.target.value })}
@@ -2742,42 +2942,21 @@ export default function HomePage() {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Märke</label>
-                    <input
-                      type="text"
-                      value={editingItem.brand || ""}
-                      onChange={(e) => setEditingItem({ ...editingItem, brand: e.target.value })}
-                      className="w-full min-h-[48px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
-                    />
-                  </div>
-                  <div>
-                    <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Modell</label>
-                    <input
-                      type="text"
-                      value={editingItem.model || ""}
-                      onChange={(e) => setEditingItem({ ...editingItem, model: e.target.value })}
-                      className="w-full min-h-[48px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Nypris idag (SEK)</label>
+                    <label className="font-semibold text-[var(--color-text-soft)] block mb-1.5 text-sm">Nypris idag (SEK)</label>
                     <input
                       type="number"
                       value={editingItem.estimated_replacement_cost_sek}
                       onChange={(e) => setEditingItem({ ...editingItem, estimated_replacement_cost_sek: Number(e.target.value) })}
-                      className="w-full min-h-[48px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] font-extrabold text-[var(--color-text)]"
+                      className="w-full min-h-[52px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] font-extrabold text-[var(--color-text)]"
                     />
                   </div>
                   <div>
-                    <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Begagnatvärde (SEK)</label>
+                    <label className="font-semibold text-[var(--color-text-soft)] block mb-1.5 text-sm">Begagnatvärde (SEK)</label>
                     <input
                       type="number"
                       value={editingItem.market_value_sek}
                       onChange={(e) => setEditingItem({ ...editingItem, market_value_sek: Number(e.target.value) })}
-                      className="w-full min-h-[48px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] font-extrabold text-[var(--color-primary)]"
+                      className="w-full min-h-[52px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] font-extrabold text-[var(--color-primary)]"
                     />
                   </div>
                 </div>
@@ -2792,7 +2971,7 @@ export default function HomePage() {
                       type="button"
                       onClick={() => receiptInputRef.current?.click()}
                       disabled={isAnalyzingReceipt}
-                      className="min-h-[38px] px-3.5 rounded-xl bg-[var(--color-primary)] text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs hover:opacity-90"
+                      className="min-h-[44px] px-4 rounded-xl bg-[var(--color-primary)] text-white text-sm font-bold flex items-center gap-1.5 shadow-2xs hover:opacity-90 transition active:scale-95"
                     >
                       {isAnalyzingReceipt ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
                       <span>{editingItem.receipt_path ? "Byt kvitto" : "Fota kvitto"}</span>
@@ -2803,7 +2982,7 @@ export default function HomePage() {
                     <div className="flex items-center justify-between p-3 rounded-2xl bg-[var(--color-primary-soft)] text-sm">
                       <div className="flex items-center gap-2 truncate">
                         <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                        <span className="font-semibold truncate">Kvitto sparat i valvet</span>
+                        <span className="font-semibold truncate text-[var(--color-primary)]">Kvitto sparat i valvet</span>
                       </div>
                       <button
                         type="button"
@@ -2815,66 +2994,128 @@ export default function HomePage() {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="grid grid-cols-2 gap-3 text-sm">
                     <div>
-                      <label className="text-[13px] font-semibold text-[var(--color-text-soft)] block mb-1">Inköpsdatum</label>
+                      <label className="font-semibold text-[var(--color-text-soft)] block mb-1.5 text-sm">Inköpsdatum</label>
                       <input
                         type="date"
                         value={editingItem.purchase_date || ""}
                         onChange={(e) => setEditingItem({ ...editingItem, purchase_date: e.target.value })}
-                        className="w-full min-h-[48px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
+                        className="w-full min-h-[52px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
                       />
                     </div>
                     <div>
-                      <label className="text-[13px] font-semibold text-[var(--color-text-soft)] block mb-1">Inköpsbutik</label>
-                      <input
-                        type="text"
-                        placeholder="t.ex. Elgiganten"
-                        value={editingItem.purchase_store || ""}
-                        onChange={(e) => setEditingItem({ ...editingItem, purchase_store: e.target.value })}
-                        className="w-full min-h-[48px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <label className="text-[13px] font-semibold text-[var(--color-text-soft)] block mb-1">Köppris (SEK)</label>
+                      <label className="font-semibold text-[var(--color-text-soft)] block mb-1.5 text-sm">Köppris (SEK)</label>
                       <input
                         type="number"
                         placeholder="Enligt kvitto"
                         value={editingItem.purchase_price_sek || ""}
                         onChange={(e) => setEditingItem({ ...editingItem, purchase_price_sek: Number(e.target.value) })}
-                        className="w-full min-h-[48px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] font-bold text-[var(--color-text)]"
+                        className="w-full min-h-[52px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] font-bold text-[var(--color-text)]"
                       />
                     </div>
-                    <div>
-                      <label className="text-[13px] font-semibold text-[var(--color-text-soft)] block mb-1">Garanti / Reklamation</label>
-                      <select
-                        value={editingItem.warranty_months || 36}
-                        onChange={(e) => setEditingItem({ ...editingItem, warranty_months: Number(e.target.value) })}
-                        className="w-full min-h-[48px] px-2 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
-                      >
-                        <option value={12}>1 år (12 mån)</option>
-                        <option value={24}>2 år (24 mån)</option>
-                        <option value={36}>3 år (Garanti / Reklamationsrätt)</option>
-                        <option value={60}>5 år (Förlängd)</option>
-                        <option value={120}>10 år (Trygghet)</option>
-                      </select>
-                    </div>
+                  </div>
+
+                  <div>
+                    <label className="font-semibold text-[var(--color-text-soft)] block mb-1.5 text-sm">Garanti & Reklamationsrätt</label>
+                    <select
+                      value={editingItem.warranty_months || 36}
+                      onChange={(e) => setEditingItem({ ...editingItem, warranty_months: Number(e.target.value) })}
+                      className="w-full min-h-[52px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)] font-medium"
+                    >
+                      <option value={12}>1 år (12 mån standardgaranti)</option>
+                      <option value={24}>2 år (24 mån tillverkargaranti)</option>
+                      <option value={36}>3 år (Lagstadgad reklamationsrätt i Sverige)</option>
+                      <option value={60}>5 år (Förlängd garanti)</option>
+                      <option value={120}>10 år (Trygghetsgaranti)</option>
+                    </select>
                   </div>
                 </div>
 
-                <div>
-                  <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Serienummer / PNC</label>
-                  <input
-                    type="text"
-                    placeholder="t.ex. 916 098 765"
-                    value={editingItem.serial_number || ""}
-                    onChange={(e) => setEditingItem({ ...editingItem, serial_number: e.target.value })}
-                    className="w-full min-h-[48px] px-3 text-base font-mono border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
-                  />
-                </div>
+                {(() => {
+                  const hasExtraDetails = Boolean(editingItem.brand || editingItem.model || editingItem.serial_number || editingItem.notes || editingItem.purchase_store);
+                  return (
+                    <div className="space-y-3">
+                      <button
+                        type="button"
+                        onClick={() => setShowMoreItemDetails(!showMoreItemDetails)}
+                        className="w-full min-h-[52px] px-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] shadow-xs flex items-center justify-between text-base font-semibold text-[var(--color-text)] hover:bg-[var(--color-bg)] transition active:scale-[.99]"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <SlidersHorizontal className="w-5 h-5 text-[var(--color-primary)]" />
+                          <span>Fler uppgifter (valfritt)</span>
+                          {hasExtraDetails && (
+                            <span className="text-[13px] bg-[var(--color-primary-soft)] text-[var(--color-primary)] font-bold px-2.5 py-0.5 rounded-full">
+                              Ifyllt
+                            </span>
+                          )}
+                        </div>
+                        <ChevronDown className={`w-5 h-5 text-[var(--color-text-soft)] transition-transform duration-200 ${showMoreItemDetails ? "rotate-180" : ""}`} />
+                      </button>
+
+                      {showMoreItemDetails && (
+                        <div className="p-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] shadow-card space-y-4 animate-in fade-in slide-in-from-top-2 duration-150">
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="font-semibold text-[var(--color-text-soft)] block mb-1.5 text-sm">Märke</label>
+                              <input
+                                type="text"
+                                placeholder="t.ex. Philips"
+                                value={editingItem.brand || ""}
+                                onChange={(e) => setEditingItem({ ...editingItem, brand: e.target.value })}
+                                className="w-full min-h-[52px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
+                              />
+                            </div>
+                            <div>
+                              <label className="font-semibold text-[var(--color-text-soft)] block mb-1.5 text-sm">Modell</label>
+                              <input
+                                type="text"
+                                placeholder="t.ex. Series 5000"
+                                value={editingItem.model || ""}
+                                onChange={(e) => setEditingItem({ ...editingItem, model: e.target.value })}
+                                className="w-full min-h-[52px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="font-semibold text-[var(--color-text-soft)] block mb-1.5 text-sm">Inköpsbutik</label>
+                              <input
+                                type="text"
+                                placeholder="t.ex. Elgiganten"
+                                value={editingItem.purchase_store || ""}
+                                onChange={(e) => setEditingItem({ ...editingItem, purchase_store: e.target.value })}
+                                className="w-full min-h-[52px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
+                              />
+                            </div>
+                            <div>
+                              <label className="font-semibold text-[var(--color-text-soft)] block mb-1.5 text-sm">Serienummer / PNC</label>
+                              <input
+                                type="text"
+                                placeholder="t.ex. 916 098 765"
+                                value={editingItem.serial_number || ""}
+                                onChange={(e) => setEditingItem({ ...editingItem, serial_number: e.target.value })}
+                                className="w-full min-h-[52px] px-3 text-base font-mono border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="font-semibold text-[var(--color-text-soft)] block mb-1.5 text-sm">Egna anteckningar</label>
+                            <textarea
+                              rows={2}
+                              placeholder="t.ex. Tillbehör, placering i skåp, kvitto i pärm..."
+                              value={editingItem.notes || ""}
+                              onChange={(e) => setEditingItem({ ...editingItem, notes: e.target.value })}
+                              className="w-full p-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {requiresManualOrCare(editingItem) && (
                   <div className="bg-[var(--color-surface)] p-4 rounded-3xl border border-[var(--color-border)] shadow-card space-y-3">
@@ -2891,7 +3132,7 @@ export default function HomePage() {
                         href={`https://www.google.com/search?q=manual+pdf+bruksanvisning+${encodeURIComponent(editingItem.brand || "")}+${encodeURIComponent(editingItem.model || editingItem.title)}`}
                         target="_blank"
                         rel="noreferrer"
-                        className="min-h-[46px] px-4 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border)] font-bold text-sm flex items-center justify-between text-[var(--color-text)] hover:bg-[var(--color-primary-soft)] transition"
+                        className="min-h-[52px] px-4 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border)] font-bold text-sm flex items-center justify-between text-[var(--color-text)] hover:bg-[var(--color-primary-soft)] transition"
                       >
                         <span className="flex items-center gap-2">
                           <BookOpen className="w-4 h-4 text-[var(--color-primary)]" />
@@ -2912,22 +3153,11 @@ export default function HomePage() {
                   <span>Sälj föremål (Blocket / Marketplace / Tradera)</span>
                 </button>
 
-                <div>
-                  <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Egna anteckningar</label>
-                  <textarea
-                    rows={2}
-                    placeholder="t.ex. Kvitto sparat, garanti, tillbehör..."
-                    value={editingItem.notes || ""}
-                    onChange={(e) => setEditingItem({ ...editingItem, notes: e.target.value })}
-                    className="w-full p-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)]"
-                  />
-                </div>
-
                 <div className="pt-2 space-y-2">
                   <button
                     type="submit"
                     disabled={isUpdating}
-                    className="min-h-[52px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98]"
+                    className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98]"
                   >
                     {isUpdating ? <Loader2 className="w-5 h-5 animate-spin" /> : <span>Spara ändringar</span>}
                   </button>
@@ -2935,7 +3165,7 @@ export default function HomePage() {
                   <button
                     type="button"
                     onClick={() => setItemToArchive(editingItem)}
-                    className="min-h-[48px] w-full rounded-2xl bg-[var(--color-bg)] border border-[var(--color-border)] font-bold text-base flex items-center justify-center gap-2 text-[var(--color-text)] hover:bg-[var(--color-primary-soft)] transition"
+                    className="min-h-[52px] w-full rounded-2xl bg-[var(--color-bg)] border border-[var(--color-border)] font-bold text-base flex items-center justify-center gap-2 text-[var(--color-text)] hover:bg-[var(--color-primary-soft)] transition"
                   >
                     <Archive className="w-4 h-4 text-[var(--color-primary)]" />
                     <span>Arkivera / Markera som sålt</span>
@@ -2944,7 +3174,7 @@ export default function HomePage() {
                   <button
                     type="button"
                     onClick={() => setItemToDelete(editingItem)}
-                    className="min-h-[44px] w-full text-[var(--color-text-soft)] text-base font-semibold hover:text-rose-600 transition"
+                    className="min-h-[48px] w-full text-[var(--color-text-soft)] text-base font-semibold hover:text-rose-600 transition"
                   >
                     Radera permanent
                   </button>
