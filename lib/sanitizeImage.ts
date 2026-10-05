@@ -20,8 +20,8 @@ export async function sanitizeAndCompressImage(file: File): Promise<ProcessedIma
           return;
         }
 
-        // 1024px är optimalt för snabb AI-analys och håller filstorleken under 150 KB
-        const MAX_DIMENSION = 1024;
+        // Höjd maxdimension till 2048px för att säkerställa hög detaljrikedom vid utskärning av enskilda föremål
+        const MAX_DIMENSION = 2048;
         let width = img.width;
         let height = img.height;
 
@@ -35,10 +35,16 @@ export async function sanitizeAndCompressImage(file: File): Promise<ProcessedIma
 
         canvas.width = width;
         canvas.height = height;
+
+        // Skarpare nerskalning
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+
         ctx.drawImage(img, 0, 0, width, height);
 
         const outputMimeType = "image/jpeg";
-        const dataUrl = canvas.toDataURL(outputMimeType, 0.7);
+        // Höjd kvalitet från 0.7 till 0.88 så att detaljer behålls intakta
+        const dataUrl = canvas.toDataURL(outputMimeType, 0.88);
         const base64Data = dataUrl.split(",")[1];
 
         resolve({
