@@ -56,7 +56,9 @@ import {
   MousePointerClick, 
   Download, 
   Share2,
-  SlidersHorizontal 
+  SlidersHorizontal,
+  MapPin,
+  FolderPlus
 } from "lucide-react";
 import { sanitizeAndCompressImage } from "@/lib/sanitizeImage";
 import { supabase } from "@/lib/supabaseClient";
@@ -65,12 +67,30 @@ import { exportToCsv, generateVaultPdf, generateIncidentPdf } from "@/lib/export
 const STANDARD_ROOMS: Record<string, string> = {
   "Vardagsrum": "🛋️",
   "Kök": "🍳",
+  "Sovrum": "🛏️",
+  "Garderob": "👗",
+  "Hall": "🚪",
   "Badrum": "🛁",
   "Tvättstuga": "🧺",
-  "Sovrum": "🛏️",
-  "Hall": "🚪",
   "Förråd": "📦",
+  "Balkong / Altan": "🪴",
+  "Garage": "🚗",
 };
+
+export function getRoomEmoji(roomName?: string): string {
+  if (!roomName) return "📦";
+  if (STANDARD_ROOMS[roomName]) return STANDARD_ROOMS[roomName];
+  const lower = roomName.toLowerCase();
+  if (lower.includes("garderob") || lower.includes("kläd") || lower.includes("closet")) return "👗";
+  if (lower.includes("sko")) return "👠";
+  if (lower.includes("barn")) return "🧸";
+  if (lower.includes("kontor") || lower.includes("arbete")) return "💻";
+  if (lower.includes("garage") || lower.includes("bil")) return "🚗";
+  if (lower.includes("balkong") || lower.includes("altan") || lower.includes("ute") || lower.includes("trädgård")) return "🪴";
+  if (lower.includes("källar") || lower.includes("vind") || lower.includes("förråd")) return "📦";
+  if (lower.includes("gäst")) return "🛌";
+  return "🏠";
+}
 
 const INSURANCE_HELP = [
   { name: "Länsförsäkringar", phone: "0771-666 115", web: "https://www.lansforsakringar.se/skada/" },
@@ -95,7 +115,7 @@ const SCAN_MESSAGES = [
   "Förbereder dina markeringar...",
 ];
 
-const SCAN_ICONS = ["🛋️", "📺", "☕", "🎸", "🪴", "🚲", "⌚", "💻"];
+const SCAN_ICONS = ["👗", "🛋️", "📺", "☕", "🎸", "🪴", "🚲", "⌚", "💻"];
 
 interface Property {
   id: string;
@@ -209,7 +229,7 @@ function requiresManualOrCare(item: VaultItem): boolean {
   
   const ignoreList = [
     "konst", "figurin", "staty", "skulptur", "prydnad", "tavla", "vas", 
-    "smycke", "klocka", "kläder", "möbel", "stol", "bord", "matta", "bok"
+    "smycke", "klocka", "kläder", "möbel", "stol", "bord", "matta", "bok", "jacka", "skor", "kängor", "väska"
   ];
   if (ignoreList.some((word) => text.includes(word))) {
     return false;
@@ -242,19 +262,19 @@ async function cropImageFromBox(
       let x2 = (xmax / 1000) * origW;
       let y2 = (ymax / 1000) * origH;
 
-      let w = x2 - x1;
-      let h = y2 - y1;
+      const padX = Math.max(wBox(x1, x2) * paddingPercent, 35);
+      const padY = Math.max(hBox(y1, y2) * paddingPercent, 35);
 
-      const padX = Math.max(w * paddingPercent, 35);
-      const padY = Math.max(h * paddingPercent, 35);
+      function wBox(a: number, b: number) { return b - a; }
+      function hBox(a: number, b: number) { return b - a; }
 
       x1 = Math.max(0, x1 - padX);
       y1 = Math.max(0, y1 - padY);
       x2 = Math.min(origW, x2 + padX);
       y2 = Math.min(origH, y2 + padY);
 
-      w = x2 - x1;
-      h = y2 - y1;
+      let w = x2 - x1;
+      let h = y2 - y1;
 
       const minDimension = 280;
       if (w < minDimension && origW >= minDimension) {
@@ -391,6 +411,9 @@ export default function HomePage() {
 
   const [activeRoom, setActiveRoom] = useState<string>("Vardagsrum");
   const [showRoomPickerScreen, setShowRoomPickerScreen] = useState(false);
+  const [customRooms, setCustomRooms] = useState<string[]>([]);
+  const [showAddRoomForm, setShowAddRoomForm] = useState(false);
+  const [newRoomNameInput, setNewRoomNameInput] = useState("");
 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [base64ForSave, setBase64ForSave] = useState<string | null>(null);
@@ -406,35 +429,6 @@ export default function HomePage() {
   const [selectedMultiIndices, setSelectedMultiIndices] = useState<number[]>([]);
   const [multiReviewStep, setMultiReviewStep] = useState<number | null>(null);
 
-  const removeMultiItem = (indexToRemove: number) => {
-    setMultiResults((prev) => {
-      const updated = prev.filter((_, idx) => idx !== indexToRemove);
-      if (updated.length === 0) {
-        setPreviewUrl(null);
-        setBase64ForSave(null);
-        setMultiReviewStep(null);
-      } else if (multiReviewStep !== null && multiReviewStep >= updated.length) {
-        setMultiReviewStep(updated.length - 1);
-      }
-      return updated;
-    });
-    setSelectedMultiIndices((prev) =>
-      prev
-        .filter((i) => i !== indexToRemove)
-        .map((i) => (i > indexToRemove ? i - 1 : i))
-    );
-  };
-
-  const updateMultiItemField = (
-    index: number,
-    field: "title" | "estimated_replacement_cost_sek",
-    value: string | number
-  ) => {
-    setMultiResults((prev) =>
-      prev.map((item, idx) => (idx === index ? { ...item, [field]: value } : item))
-    );
-  };
-
   const [totalValuationSek, setTotalValuationSek] = useState<number>(0);
   const [vaultItems, setVaultItems] = useState<VaultItem[]>([]);
   const [selectedRoomFilter, setSelectedRoomFilter] = useState<string>("Alla");
@@ -443,11 +437,6 @@ export default function HomePage() {
   const [showMoreItemDetails, setShowMoreItemDetails] = useState<boolean>(false);
   const [activeImageIndex, setActiveImageIndex] = useState<number>(0);
 
-  const openEditItem = (item: VaultItem) => {
-    setEditingItem({ ...item });
-    setActiveImageIndex(0);
-    setShowMoreItemDetails(Boolean(item.brand || item.model || item.serial_number || item.notes || item.purchase_store));
-  };
   const [isUpdating, setIsUpdating] = useState(false);
   const [isUploadingItemPhoto, setIsUploadingItemPhoto] = useState(false);
   const [isAnalyzingReceipt, setIsAnalyzingReceipt] = useState(false);
@@ -509,6 +498,84 @@ export default function HomePage() {
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const openEditItem = (item: VaultItem) => {
+    setEditingItem({ ...item });
+    setActiveImageIndex(0);
+    setShowMoreItemDetails(Boolean(item.brand || item.model || item.serial_number || item.notes || item.purchase_store));
+  };
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("bovalvet_custom_rooms");
+      if (saved) {
+        setCustomRooms(JSON.parse(saved));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
+  const activeVaultItems = vaultItems.filter((i) => !i.is_archived);
+  const archivedVaultItems = vaultItems.filter((i) => i.is_archived);
+
+  const allRooms: string[] = Array.from(
+    new Set([
+      ...Object.keys(STANDARD_ROOMS),
+      ...customRooms,
+      ...activeVaultItems.map((i) => i.room).filter((r): r is string => Boolean(r) && r !== "Ospecificerat")
+    ])
+  );
+
+  const handleCreateNewRoom = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanName = newRoomNameInput.trim();
+    if (!cleanName) return;
+
+    if (!allRooms.includes(cleanName)) {
+      const updated = [...customRooms, cleanName];
+      setCustomRooms(updated);
+      try {
+        localStorage.setItem("bovalvet_custom_rooms", JSON.stringify(updated));
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    setActiveRoom(cleanName);
+    setNewRoomNameInput("");
+    setShowAddRoomForm(false);
+    showToast(`Rummet "${cleanName}" har lagts till ✓`);
+  };
+
+  const removeMultiItem = (indexToRemove: number) => {
+    setMultiResults((prev) => {
+      const updated = prev.filter((_, idx) => idx !== indexToRemove);
+      if (updated.length === 0) {
+        setPreviewUrl(null);
+        setBase64ForSave(null);
+        setMultiReviewStep(null);
+      } else if (multiReviewStep !== null && multiReviewStep >= updated.length) {
+        setMultiReviewStep(updated.length - 1);
+      }
+      return updated;
+    });
+    setSelectedMultiIndices((prev) =>
+      prev
+        .filter((i) => i !== indexToRemove)
+        .map((i) => (i > indexToRemove ? i - 1 : i))
+    );
+  };
+
+  const updateMultiItemField = (
+    index: number,
+    field: "title" | "estimated_replacement_cost_sek",
+    value: string | number
+  ) => {
+    setMultiResults((prev) =>
+      prev.map((item, idx) => (idx === index ? { ...item, [field]: value } : item))
+    );
   };
 
   useEffect(() => {
@@ -1349,12 +1416,6 @@ export default function HomePage() {
     }
   };
 
-  const toggleMultiItemSelection = (index: number) => {
-    setSelectedMultiIndices((prev) =>
-      prev.includes(index) ? prev.filter((i) => i !== index) : [...prev, index]
-    );
-  };
-
   const executeSaveAiItem = async (userId: string) => {
     if (!result || !base64ForSave) return;
 
@@ -1540,7 +1601,7 @@ export default function HomePage() {
       setPreviewUrl(null);
       setBase64ForSave(null);
 
-      showToast(`${itemsToSave.length} föremål sparades med egna närbilder ✓`);
+      showToast(`${itemsToSave.length} föremål sparades med närbilder i ${activeRoom} ✓`);
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1712,12 +1773,8 @@ export default function HomePage() {
     showToast("Du har loggat ut");
   };
 
-  const roomKeys = Object.keys(STANDARD_ROOMS);
-  const activeVaultItems = vaultItems.filter((i) => !i.is_archived);
-  const archivedVaultItems = vaultItems.filter((i) => i.is_archived);
-
-  const startedRoomCount = roomKeys.filter((r) => activeVaultItems.some((i) => i.room === r)).length;
-  const firstEmptyRoom = roomKeys.find((r) => !activeVaultItems.some((i) => i.room === r));
+  const startedRoomCount = allRooms.filter((r) => activeVaultItems.some((i) => i.room === r)).length;
+  const firstEmptyRoom = allRooms.find((r) => !activeVaultItems.some((i) => i.room === r));
 
   const filteredItemsByRoom = activeVaultItems.filter((i) => {
     if (selectedRoomFilter === "Alla") return true;
@@ -1856,10 +1913,14 @@ export default function HomePage() {
 
         <main className="flex-1 px-5 pt-1 space-y-6 overflow-y-auto">
 
+          {/* RUMSVÄLJARE (MED GARDEROB & EGET RUM) */}
           {showRoomPickerScreen && !isAnalyzing && !result && multiResults.length === 0 && !editingItem && !showArchiveHub && (
             <div className="space-y-4 animate-in fade-in pt-2">
               <button 
-                onClick={() => setShowRoomPickerScreen(false)}
+                onClick={() => {
+                  setShowRoomPickerScreen(false);
+                  setShowAddRoomForm(false);
+                }}
                 className="min-h-[44px] flex items-center gap-1 text-[var(--color-primary)] font-bold text-base -ml-2"
               >
                 ← Klar
@@ -1873,7 +1934,7 @@ export default function HomePage() {
               </div>
 
               <div className="grid grid-cols-2 gap-3 pt-2">
-                {roomKeys.map((rName) => {
+                {allRooms.map((rName) => {
                   const isSelected = activeRoom === rName;
                   return (
                     <button
@@ -1886,14 +1947,55 @@ export default function HomePage() {
                           : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)]"
                       }`}
                     >
-                      <span className="text-2xl">{STANDARD_ROOMS[rName]}</span>
-                      <span>{rName}</span>
+                      <span className="text-2xl">{getRoomEmoji(rName)}</span>
+                      <span className="truncate">{rName}</span>
                     </button>
                   );
                 })}
+
+                <button
+                  type="button"
+                  onClick={() => setShowAddRoomForm(true)}
+                  className="min-h-[64px] rounded-2xl border-2 border-dashed border-[var(--color-border)] p-3 text-left flex items-center gap-3 text-[var(--color-primary)] font-bold text-base hover:bg-[var(--color-primary-soft)] transition"
+                >
+                  <FolderPlus className="w-6 h-6 flex-shrink-0" />
+                  <span>+ Eget rum</span>
+                </button>
               </div>
 
-              <div className="pt-6 space-y-2">
+              {showAddRoomForm && (
+                <form onSubmit={handleCreateNewRoom} className="p-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] space-y-3 animate-in fade-in">
+                  <label className="text-xs font-bold text-[var(--color-text-soft)] block">
+                    VAD HETER DITT NYA RUM?
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="t.ex. Klädkammare, Vinkällare, Gästrum..."
+                    value={newRoomNameInput}
+                    onChange={(e) => setNewRoomNameInput(e.target.value)}
+                    className="w-full min-h-[48px] px-3.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] font-semibold text-base"
+                    autoFocus
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="submit"
+                      className="flex-1 min-h-[44px] rounded-xl bg-[var(--color-primary)] text-white font-bold text-sm"
+                    >
+                      Spara och välj rum
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddRoomForm(false)}
+                      className="px-4 min-h-[44px] rounded-xl bg-[var(--color-bg)] border border-[var(--color-border)] text-sm font-semibold"
+                    >
+                      Avbryt
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              <div className="pt-4 space-y-2">
                 <button
                   type="button"
                   onClick={() => cameraInputRef.current?.click()}
@@ -1913,6 +2015,7 @@ export default function HomePage() {
             </div>
           )}
 
+          {/* SKANNINGSANIMATION */}
           {isAnalyzing && (
             <div className="py-16 text-center space-y-7 animate-in fade-in select-none">
               <div className="relative w-52 h-52 mx-auto">
@@ -1949,6 +2052,7 @@ export default function HomePage() {
             </div>
           )}
 
+          {/* MULTI-RESULTAT (ÖVERSIKTSVY UTAN POINT-AND-PICK) */}
           {multiResults.length > 0 && !isAnalyzing && multiReviewStep === null && (
             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-200">
               <div className="flex items-center justify-between">
@@ -2009,7 +2113,7 @@ export default function HomePage() {
                           // eslint-disable-next-line @next/next/no-img-element
                           <img src={item.previewCropUrl} alt={item.title} className="w-full h-full object-cover" />
                         ) : (
-                          <span className="text-xl">{STANDARD_ROOMS[activeRoom] || "📦"}</span>
+                          <span className="text-xl">{getRoomEmoji(activeRoom)}</span>
                         )}
                       </div>
 
@@ -2071,6 +2175,7 @@ export default function HomePage() {
             </div>
           )}
 
+          {/* MULTI-RESULTAT (STEGNINGSLÄGE ETT OCH ETT) */}
           {multiResults.length > 0 && !isAnalyzing && multiReviewStep !== null && (
             <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-200">
               <div className="flex items-center justify-between">
@@ -2151,6 +2256,7 @@ export default function HomePage() {
             </div>
           )}
 
+          {/* ENKELT FÖREMÅL */}
           {result && !isAnalyzing && multiResults.length === 0 && (
             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-200">
               <button 
@@ -2246,6 +2352,7 @@ export default function HomePage() {
             </div>
           )}
 
+          {/* STARTSIDA (HEM) */}
           {!showRoomPickerScreen && !isAnalyzing && !result && multiResults.length === 0 && !editingItem && !showArchiveHub && currentNav === "home" && (
             <div className="space-y-6 animate-in fade-in">
               <div>
@@ -2272,11 +2379,11 @@ export default function HomePage() {
                   <div className="w-full bg-[var(--color-border)] rounded-full h-2.5 overflow-hidden">
                     <div 
                       className="h-full bg-[var(--color-primary)] rounded-full transition-all duration-500"
-                      style={{ width: `${Math.round((startedRoomCount / 7) * 100)}%` }}
+                      style={{ width: `${Math.round((startedRoomCount / Math.max(allRooms.length, 1)) * 100)}%` }}
                     />
                   </div>
                   <span className="text-[15px] text-[var(--color-text-soft)] font-medium block">
-                    Hemmets inventering: {startedRoomCount} av 7 rum påbörjade
+                    Hemmets inventering: {startedRoomCount} av {allRooms.length} rum påbörjade
                   </span>
                 </div>
 
@@ -2338,7 +2445,7 @@ export default function HomePage() {
                 </div>
 
                 <div className="flex gap-3 overflow-x-auto -mx-5 px-5 pb-2 scrollbar-none">
-                  {roomKeys
+                  {allRooms
                     .sort((a, b) => {
                       const countA = activeVaultItems.filter((i) => i.room === a).length;
                       const countB = activeVaultItems.filter((i) => i.room === b).length;
@@ -2356,7 +2463,7 @@ export default function HomePage() {
                           className="flex-shrink-0 w-[150px] bg-[var(--color-surface)] border border-[var(--color-border)] rounded-2xl overflow-hidden shadow-card text-left cursor-pointer active:scale-[.98] transition"
                         >
                           <div className="h-[76px] bg-[var(--color-primary-soft)] flex items-center justify-center text-3xl">
-                            {STANDARD_ROOMS[rName]}
+                            {getRoomEmoji(rName)}
                           </div>
                           <div className="p-3">
                             <b className="text-base text-[var(--color-text)] block truncate">{rName}</b>
@@ -2399,7 +2506,7 @@ export default function HomePage() {
                             // eslint-disable-next-line @next/next/no-img-element
                             <img src={item.imageUrl} alt={item.title} className="w-full h-full object-cover" />
                           ) : (
-                            <span>{STANDARD_ROOMS[item.room || ""] || "📦"}</span>
+                            <span>{getRoomEmoji(item.room)}</span>
                           )}
                         </div>
                         <div className="flex-1 min-w-0">
@@ -2418,9 +2525,23 @@ export default function HomePage() {
             </div>
           )}
 
+          {/* RUM-FLIKEN */}
           {!showRoomPickerScreen && !isAnalyzing && !result && multiResults.length === 0 && !editingItem && !showArchiveHub && currentNav === "rooms" && (
             <div className="space-y-4 animate-in fade-in">
-              <h1 className="text-[24px] font-extrabold text-[var(--color-text)] pt-1">Dina rum</h1>
+              <div className="flex items-center justify-between pt-1">
+                <h1 className="text-[24px] font-extrabold text-[var(--color-text)]">Dina rum</h1>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowRoomPickerScreen(true);
+                    setShowAddRoomForm(true);
+                  }}
+                  className="text-xs font-bold text-[var(--color-primary)] px-3 py-1.5 rounded-full bg-[var(--color-primary-soft)] flex items-center gap-1"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Skapa eget rum</span>
+                </button>
+              </div>
 
               <div className="flex gap-2 overflow-x-auto -mx-5 px-5 pb-1 scrollbar-none">
                 <button
@@ -2434,7 +2555,7 @@ export default function HomePage() {
                 >
                   Alla ({activeVaultItems.length})
                 </button>
-                {roomKeys.map((r) => {
+                {allRooms.map((r) => {
                   const count = activeVaultItems.filter((i) => i.room === r).length;
                   return (
                     <button
@@ -2456,7 +2577,7 @@ export default function HomePage() {
               <div className="space-y-2.5 pt-1">
                 {filteredItemsByRoom.length === 0 ? (
                   <div className="text-center py-12 bg-[var(--color-surface)] rounded-3xl border border-[var(--color-border)] p-6 space-y-3">
-                    <span className="text-5xl">{STANDARD_ROOMS[selectedRoomFilter] || "📷"}</span>
+                    <span className="text-5xl">{getRoomEmoji(selectedRoomFilter)}</span>
                     <h2 className="text-xl font-bold text-[var(--color-text)]">Här är det tomt</h2>
                     <p className="text-[16px] text-[var(--color-text-soft)]">
                       Ta ett foto, så fyller vi i märke, modell och värde åt dig.
@@ -2487,7 +2608,7 @@ export default function HomePage() {
                             // eslint-disable-next-line @next/next/no-img-element
                             <img src={item.imageUrl} alt={item.title} className="w-full h-full object-cover" />
                           ) : (
-                            <span>{STANDARD_ROOMS[item.room || ""] || "📦"}</span>
+                            <span>{getRoomEmoji(item.room)}</span>
                           )}
                         </div>
                         <div className="flex-1 min-w-0">
@@ -2513,6 +2634,7 @@ export default function HomePage() {
             </div>
           )}
 
+          {/* FÖRSÄKRING & GARANTI */}
           {!showRoomPickerScreen && !isAnalyzing && !result && multiResults.length === 0 && !editingItem && !showArchiveHub && currentNav === "insurance" && (
             <div className="space-y-6 animate-in fade-in">
               <h1 className="text-[24px] font-extrabold text-[var(--color-text)] pt-1">Försäkring & Garanti</h1>
@@ -2652,6 +2774,7 @@ export default function HomePage() {
             </div>
           )}
 
+          {/* KUNSKAP & MER-FLIKEN */}
           {!showRoomPickerScreen && !isAnalyzing && !result && multiResults.length === 0 && !editingItem && !showArchiveHub && currentNav === "more" && (
             <div className="space-y-5 animate-in fade-in">
               <div>
@@ -2749,6 +2872,7 @@ export default function HomePage() {
             </div>
           )}
 
+          {/* ARKIV & SÅLDA FÖREMÅL */}
           {showArchiveHub && (
             <div className="space-y-4 animate-in fade-in pt-1 pb-6">
               <button 
@@ -2787,7 +2911,7 @@ export default function HomePage() {
                               // eslint-disable-next-line @next/next/no-img-element
                               <img src={item.imageUrl} alt={item.title} className="w-full h-full object-cover" />
                             ) : (
-                              <span>📦</span>
+                              <span>{getRoomEmoji(item.room)}</span>
                             )}
                           </div>
                           <div>
@@ -2834,6 +2958,7 @@ export default function HomePage() {
             </div>
           )}
 
+          {/* REDIGERA FÖREMÅL (LESS IS MORE + ACCORDION) */}
           {editingItem && !showArchiveHub && (
             <div className="space-y-4 animate-in fade-in pt-1 pb-6">
               <div className="flex items-center justify-between bg-[var(--color-primary-soft)] p-3 rounded-2xl border border-[var(--color-border)]">
@@ -2934,7 +3059,7 @@ export default function HomePage() {
                     onChange={(e) => setEditingItem({ ...editingItem, room: e.target.value })}
                     className="w-full min-h-[52px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)] font-medium"
                   >
-                    {roomKeys.map((r) => (
+                    {allRooms.map((r) => (
                       <option key={r} value={r}>{r}</option>
                     ))}
                   </select>
@@ -3184,6 +3309,7 @@ export default function HomePage() {
           )}
         </main>
 
+        {/* BOTTENNAVIGERING */}
         {!showRoomPickerScreen && !isAnalyzing && !result && multiResults.length === 0 && !editingItem && !showArchiveHub && (
           <nav className="fixed bottom-0 left-0 right-0 md:left-1/2 md:-translate-x-1/2 md:max-w-[480px] md:border-x z-40 bg-[var(--color-surface)] border-t border-[var(--color-border)] h-[70px] flex items-center justify-around px-2 shadow-sm">
             <div className="w-full max-w-[480px] mx-auto flex items-center justify-around">
@@ -3245,7 +3371,7 @@ export default function HomePage() {
           </nav>
         )}
 
-        {/* SPARA OCH DELA (RENSAD FRÅN JSON OCH TEKNISK JARGONG) */}
+        {/* MODALER (EXPORT, PRO, PROFIL, MM) */}
         {showExportModal && (
           <div 
             className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in"
@@ -3274,7 +3400,6 @@ export default function HomePage() {
                 </button>
               </div>
 
-              {/* Rumsurval */}
               <div>
                 <label className="text-xs font-bold text-[var(--color-text-soft)] block mb-1.5">
                   VILKA FÖREMÅL VILL DU HA MED?
@@ -3291,7 +3416,7 @@ export default function HomePage() {
                   >
                     Hela hemmet ({activeVaultItems.length})
                   </button>
-                  {roomKeys.map((r) => {
+                  {allRooms.map((r) => {
                     const rCount = activeVaultItems.filter((i) => i.room === r).length;
                     if (rCount === 0) return null;
                     return (
@@ -3312,9 +3437,7 @@ export default function HomePage() {
                 </div>
               </div>
 
-              {/* Endast 2 val: PDF och Kalkylark */}
               <div className="space-y-3 pt-1">
-                {/* 1. PDF för försäkringsbolag */}
                 <button
                   type="button"
                   onClick={() => {
@@ -3348,7 +3471,6 @@ export default function HomePage() {
                   <ChevronRight className="w-5 h-5 text-[var(--color-text-soft)] opacity-40 group-hover:opacity-100 transition flex-shrink-0 ml-2" />
                 </button>
 
-                {/* 2. Kalkylark för Excel / Numbers */}
                 <button
                   type="button"
                   onClick={() => {
@@ -3764,7 +3886,7 @@ export default function HomePage() {
                   }}
                   className="w-full min-h-[72px] rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] p-4 flex items-center gap-3.5 text-left active:scale-[.98] transition"
                 >
-                  <span className="text-3xl">✍️</span>
+                  <span className="text-3xl">✍️️</span>
                   <div>
                     <b className="text-[17px] block">Lägg till själv</b>
                     <span className="text-[15px] text-[var(--color-text-soft)]">Privat, utan AI. Bra för smycken och konst</span>
@@ -3818,7 +3940,7 @@ export default function HomePage() {
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={listingModalItem.imageUrl} alt={listingModalItem.title} className="w-full h-full object-cover" />
                     ) : (
-                      <span>📦</span>
+                      <span>{getRoomEmoji(listingModalItem.room)}</span>
                     )}
                   </div>
                   <div className="min-w-0">
@@ -4025,7 +4147,7 @@ export default function HomePage() {
                 <div>
                   <span className="text-xs font-semibold text-[var(--color-text-soft)] block mb-1">Välj drabbat rum</span>
                   <div className="flex flex-wrap gap-1">
-                    {roomKeys.map((r) => (
+                    {allRooms.map((r) => (
                       <button
                         key={r}
                         type="button"
@@ -4088,7 +4210,7 @@ export default function HomePage() {
                   <input
                     type="text"
                     required
-                    placeholder="t.ex. Guldring 18k, Ärvt matbord"
+                    placeholder="t.ex. Vinterkappa ull, Guldring 18k"
                     value={manualFormData.title || ""}
                     onChange={(e) => setManualFormData({ ...manualFormData, title: e.target.value })}
                     className="w-full min-h-[48px] px-3.5 border border-[var(--color-border)] rounded-xl font-medium bg-[var(--color-surface)] text-base"
@@ -4103,7 +4225,7 @@ export default function HomePage() {
                       onChange={(e) => setManualFormData({ ...manualFormData, room: e.target.value })}
                       className="w-full min-h-[48px] px-3 border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-base"
                     >
-                      {roomKeys.map((r) => <option key={r} value={r}>{r}</option>)}
+                      {allRooms.map((r) => <option key={r} value={r}>{r}</option>)}
                     </select>
                   </div>
                   <div>
