@@ -900,6 +900,30 @@ export default function HomePage() {
     }
   };
 
+  const handleInviteMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProperty || !inviteEmail.trim()) return;
+
+    setIsInviting(true);
+    try {
+      const { error } = await supabase.from("property_members").insert({
+        property_id: selectedProperty.id,
+        user_email: inviteEmail.trim(),
+        role: "member"
+      });
+
+      if (error) throw error;
+
+      setInviteEmail("");
+      await fetchPropertyMembers(selectedProperty.id);
+      showToast("Inbjudan skickad ✓");
+    } catch (err: any) {
+      alert(`Kunde inte bjuda in: ${err.message}`);
+    } finally {
+      setIsInviting(false);
+    }
+  };
+
   const fetchVaultStats = async (userId: string, propertyId?: string) => {
     try {
       let query = supabase.from("items").select("estimated_replacement_cost_sek").eq("user_id", userId).eq("is_archived", false);
@@ -1630,7 +1654,7 @@ export default function HomePage() {
       const repCost = Number(manualFormData.estimated_replacement_cost_sek) || 0;
       const mktVal = Number(manualFormData.market_value_sek) || Math.round(repCost * 0.5);
 
-      const { data: insertedData, error: insertErr } = await supabase.from("items").insert({
+      const { error: insertErr } = await supabase.from("items").insert({
         user_id: sessionUser.id,
         property_id: selectedProperty?.id || null,
         title: manualFormData.title,
@@ -2096,7 +2120,7 @@ export default function HomePage() {
                   })}
                   
                   <div className="absolute bottom-2.5 right-2.5 bg-black/70 backdrop-blur-md px-3 py-1 rounded-full text-xs font-semibold text-white pointer-events-none">
-                    Klicka på en siffra eller lista för att granska
+                    Klicka på en siffra eller rad för att granska
                   </div>
                 </div>
               )}
@@ -2179,7 +2203,6 @@ export default function HomePage() {
           {/* 2. DEN GUIDADE GENOMGÅNGEN */}
           {multiResults.length > 0 && !isAnalyzing && multiReviewStep !== null && (
             <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-200">
-              
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <button 
@@ -2404,49 +2427,70 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* STARTSIDA (HEM) */}
+          {/* STARTSIDA (HEM) – LUGN, FOKUSERAD & UTAN RUMSKARUSELL */}
           {!showRoomPickerScreen && !isAnalyzing && !result && multiResults.length === 0 && !editingItem && !showArchiveHub && currentNav === "home" && (
             <div className="space-y-6 animate-in fade-in">
+              {/* PUNKT 1: Hälsning utan textupprepning */}
               <div>
                 <h1 className="text-[26px] font-extrabold text-[var(--color-text)]">
                   Hej, {displayName || (sessionUser ? "där" : "gäst")}!
                 </h1>
-                <p className="text-[16px] text-[var(--color-text-soft)] mt-0.5">
-                  {sessionUser ? formatItemsCount(activeVaultItems.length) : "Skapa ett konto för att säkra ditt hem"}
+                <p className="text-[15px] text-[var(--color-text-soft)] mt-0.5 font-medium">
+                  Översikt för {selectedProperty?.name || "hemmet"}
                 </p>
               </div>
 
-              <div className="bg-gradient-to-br from-[var(--color-primary-soft)] to-[var(--color-surface)] rounded-3xl p-5 border border-[var(--color-border)] shadow-card space-y-3">
-                <span className="text-[15px] text-[var(--color-text-soft)] font-semibold block">
-                  Värdet på dina föremål
-                </span>
-                <div className="text-[40px] font-black tracking-tight text-[var(--color-text)] leading-none">
-                  {totalValuationSek.toLocaleString("sv-SE")} kr
+              {/* PUNKT 2 & 3: Integrerat Huvudkort med inbakad rumsstatus */}
+              <div className="bg-gradient-to-br from-[var(--color-primary-soft)] to-[var(--color-surface)] rounded-3xl p-5 border border-[var(--color-border)] shadow-card space-y-4">
+                <div>
+                  <span className="text-[14px] text-[var(--color-text-soft)] font-semibold block">
+                    Värdet på dina föremål
+                  </span>
+                  <div className="text-[40px] font-black tracking-tight text-[var(--color-text)] leading-none mt-1">
+                    {totalValuationSek.toLocaleString("sv-SE")} kr
+                  </div>
+                  <p className="text-[15px] text-[var(--color-text)] leading-snug mt-2">
+                    {formatItemsCount(activeVaultItems.length)} säkrade med foto och uppgifter
+                  </p>
                 </div>
-                <p className="text-[16px] text-[var(--color-text)] leading-snug">
-                  {formatItemsCount(activeVaultItems.length)} med foto, kvitto och serienummer
-                </p>
 
-                <div className="pt-2 space-y-1.5">
-                  <div className="w-full bg-[var(--color-border)] rounded-full h-2.5 overflow-hidden">
+                {/* Framsteg & Inbakad Nästa-steg-knapp */}
+                <div className="p-3 bg-[var(--color-surface)]/80 rounded-2xl border border-[var(--color-border)] space-y-2">
+                  <div className="flex items-center justify-between text-[14px]">
+                    <span className="text-[var(--color-text-soft)] font-medium">
+                      Inventering: <strong>{startedRoomCount} av {allRooms.length} rum</strong>
+                    </span>
+                    {firstEmptyRoom && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveRoom(firstEmptyRoom);
+                          setShowRoomPickerScreen(true);
+                        }}
+                        className="text-[var(--color-primary)] font-extrabold flex items-center gap-1 hover:underline active:scale-95 transition"
+                      >
+                        <Camera className="w-3.5 h-3.5" />
+                        <span>Nästa: {firstEmptyRoom}</span>
+                      </button>
+                    )}
+                  </div>
+                  <div className="w-full bg-[var(--color-border)] rounded-full h-2 overflow-hidden">
                     <div 
                       className="h-full bg-[var(--color-primary)] rounded-full transition-all duration-500"
                       style={{ width: `${Math.round((startedRoomCount / Math.max(allRooms.length, 1)) * 100)}%` }}
                     />
                   </div>
-                  <span className="text-[15px] text-[var(--color-text-soft)] font-medium block">
-                    Hemmets inventering: {startedRoomCount} av {allRooms.length} rum påbörjade
-                  </span>
                 </div>
 
-                <div className="pt-3 border-t border-[var(--color-border)] flex items-center justify-between text-[15px] text-[var(--color-text-soft)]">
-                  <span>Försäkring gäller upp till {Number(selectedProperty?.coverage_limit_sek || 1000000).toLocaleString("sv-SE")} kr</span>
+                <div className="pt-1 border-t border-[var(--color-border)] flex items-center justify-between text-[14px] text-[var(--color-text-soft)]">
+                  <span>Försäkringstak: {Number(selectedProperty?.coverage_limit_sek || 1000000).toLocaleString("sv-SE")} kr</span>
                   <button onClick={() => setCurrentNav("insurance")} className="text-[var(--color-primary)] font-bold hover:underline">
-                    Se försäkring & garanti
+                    Se villkor & skydd
                   </button>
                 </div>
               </div>
 
+              {/* PUNKT 6: Garantivarning (endast om akut) */}
               {expiringSoonItems.length > 0 && (
                 <div 
                   onClick={() => {
@@ -2468,67 +2512,17 @@ export default function HomePage() {
                 </div>
               )}
 
-              {firstEmptyRoom && (
-                <div className="bg-[var(--color-surface)] p-4 rounded-2xl border border-[var(--color-border)] shadow-2xs flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <span className="text-[14px] text-[var(--color-text-soft)] block font-medium">Nästa steg</span>
-                    <b className="text-base text-[var(--color-text)] block truncate">{firstEmptyRoom} är tomt</b>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveRoom(firstEmptyRoom);
-                      setShowRoomPickerScreen(true);
-                    }}
-                    className="min-h-[44px] px-4 rounded-xl bg-[var(--color-primary-soft)] text-[var(--color-primary)] font-bold text-sm flex items-center gap-1.5 flex-shrink-0 hover:bg-[var(--color-primary)] hover:text-white transition"
-                  >
-                    <Camera className="w-4 h-4" />
-                    <span>Fota här</span>
-                  </button>
-                </div>
-              )}
-
-              <div className="space-y-3">
+              {/* PUNKT 5: Senast tillagt (lyft upp direkt, rumskarusell borttagen) */}
+              <div className="space-y-3 pt-1">
                 <div className="flex justify-between items-center">
-                  <h2 className="text-[20px] font-extrabold text-[var(--color-text)]">Rum</h2>
-                  <button onClick={() => setCurrentNav("rooms")} className="text-[var(--color-primary)] font-bold text-base">
-                    Visa alla
-                  </button>
+                  <h2 className="text-[20px] font-extrabold text-[var(--color-text)]">Senast tillagt</h2>
+                  {activeVaultItems.length > 5 && (
+                    <button onClick={() => setCurrentNav("rooms")} className="text-[var(--color-primary)] font-bold text-sm">
+                      Visa alla föremål
+                    </button>
+                  )}
                 </div>
 
-                <div className="flex gap-3 overflow-x-auto -mx-5 px-5 pb-2 scrollbar-none">
-                  {allRooms
-                    .sort((a, b) => {
-                      const countA = activeVaultItems.filter((i) => i.room === a).length;
-                      const countB = activeVaultItems.filter((i) => i.room === b).length;
-                      return countB - countA;
-                    })
-                    .map((rName) => {
-                      const count = activeVaultItems.filter((i) => i.room === rName).length;
-                      return (
-                        <div
-                          key={rName}
-                          onClick={() => {
-                            setSelectedRoomFilter(rName);
-                            setCurrentNav("rooms");
-                          }}
-                          className="flex-shrink-0 w-[150px] bg-[var(--color-surface)] border border-[var(--color-border)] rounded-2xl overflow-hidden shadow-card text-left cursor-pointer active:scale-[.98] transition"
-                        >
-                          <div className="h-[76px] bg-[var(--color-primary-soft)] flex items-center justify-center text-3xl">
-                            {getRoomEmoji(rName)}
-                          </div>
-                          <div className="p-3">
-                            <b className="text-base text-[var(--color-text)] block truncate">{rName}</b>
-                            <span className="text-[14px] text-[var(--color-text-soft)]">{formatItemsCount(count)}</span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <h2 className="text-[20px] font-extrabold text-[var(--color-text)]">Senast tillagt</h2>
                 {activeVaultItems.length === 0 ? (
                   <div className="text-center py-10 bg-[var(--color-surface)] rounded-3xl border border-[var(--color-border)] p-6 space-y-3 shadow-card">
                     <span className="text-4xl">📷</span>
@@ -2547,7 +2541,7 @@ export default function HomePage() {
                   </div>
                 ) : (
                   <div className="space-y-2.5">
-                    {activeVaultItems.slice(0, 5).map((item) => (
+                    {activeVaultItems.slice(0, 6).map((item) => (
                       <div
                         key={item.id}
                         onClick={() => openEditItem(item)}
