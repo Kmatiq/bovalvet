@@ -1640,7 +1640,7 @@ export default function HomePage() {
   const avatarLetter = (displayName || sessionUser?.email || "K").trim()[0].toUpperCase();
 
   return (
-    <div className="min-h-screen bg-[var(--color-bg)] md:bg-[#EDE7DE] text-[var(--color-text)] flex justify-center selection:bg-[var(--color-primary-soft)] selection:text-[var(--color-primary)]">
+    <div className="min-h-screen bg-[var(--color-bg)] md:bg-[#ECE4D8] text-[var(--color-text)] flex justify-center selection:bg-[var(--color-primary-soft)] selection:text-[var(--color-primary)]">
       <div className="w-full max-w-[480px] min-h-screen flex flex-col relative pb-32 bg-[var(--color-bg)] md:shadow-md md:border-x md:border-[var(--color-border)]">
 
         {!isOnline && (

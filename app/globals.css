@@ -1,46 +1,28 @@
 @import "tailwindcss";
 
 @theme {
-  /* Färger – Varmt hem */
-  --color-bg: #FAF6F1;
+  /* Färger – Varmt och ombonat skandinaviskt hem */
+  --color-bg: #F9F5EF;
   --color-surface: #FFFFFF;
-  --color-border: #EAE3D9;
-  --color-text: #1F2A26;
-  --color-text-soft: #5B6660;
-  --color-primary: #2F5D50;
-  --color-primary-soft: #E6F0EA;
-  --color-accent: #E0533A;
-  --color-accent-soft: #FDE9E4;
+  --color-border: #E8E0D5;
+  --color-text: #1C2723;
+  --color-text-soft: #5C6761;
+  --color-primary: #2B574A;
+  --color-primary-soft: #E8F1EC;
+  --color-accent: #D9543B;
+  --color-accent-soft: #FCECE8;
   --color-success-bg: #E3F1EA;
   --color-success-text: #1E5A44;
   --color-warn-bg: #FFF1D6;
   --color-warn-text: #7A4B00;
-  --color-expired-bg: #ECE8E2;
-  --color-expired-text: #5B6660;
+  --color-expired-bg: #EFEBE5;
+  --color-expired-text: #5C6761;
   --color-danger: #B3261E;
 
   --font-sans: "Inter", system-ui, -apple-system, sans-serif;
   --radius-card: 1.25rem;
   --radius-control: 1rem;
-  --shadow-card: 0 2px 8px rgba(31, 42, 38, 0.06);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-bg: #141917;
-    --color-surface: #1E2622;
-    --color-border: #2F3A35;
-    --color-text: #F2EFEA;
-    --color-text-soft: #B4BDB7;
-    --color-primary: #7FC4AE;
-    --color-primary-soft: #23342D;
-    --color-accent: #F0694F;
-    --color-success-bg: #23382E;
-    --color-success-text: #9AD8BC;
-    --color-warn-bg: #3A2F14;
-    --color-warn-text: #F2C879;
-    --color-danger: #FF8A80;
-  }
+  --shadow-card: 0 2px 8px rgba(28, 39, 35, 0.05);
 }
 
 /* SÄKERHETSNÄT: Inget får någonsin bli mindre än 14 px (förutom nav 13px) */
