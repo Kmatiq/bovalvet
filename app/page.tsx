@@ -68,7 +68,7 @@ import { exportToCsv, generateVaultPdf, generateIncidentPdf } from "@/lib/export
 const STANDARD_ROOMS: Record<string, string> = {
   "Vardagsrum": "🛋️",
   "Kök": "🍳",
-  "Sovrum": "🛏️️",
+  "Sovrum": "🛏️",
   "Garderob": "👗",
   "Hall": "🚪",
   "Badrum": "🛁",
@@ -377,14 +377,10 @@ async function cropImageToDataUrl(
   });
 }
 
-const FREE_ITEM_LIMIT = 20;
-
 export default function HomePage() {
   const [currentNav, setCurrentNav] = useState<"home" | "rooms" | "insurance" | "more">("home");
   const [sessionUser, setSessionUser] = useState<any>(null);
 
-  const [isPro, setIsPro] = useState(false);
-  const [showProModal, setShowProModal] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
   const [offlineQueue, setOfflineQueue] = useState<any[]>([]);
 
@@ -426,7 +422,7 @@ export default function HomePage() {
   const [multiReviewStep, setMultiReviewStep] = useState<number | null>(null);
   const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
 
-  // SPAR-BEKRÄFTELSE MODAL
+  // SPAR-BEKRÄFTELSE MODAL (DOPAMINKORTET)
   const [savedSuccessInfo, setSavedSuccessInfo] = useState<{
     count: number;
     totalAddedSek: number;
@@ -578,7 +574,6 @@ export default function HomePage() {
     );
   };
 
-  // KVITTO-UPPLADDNING UNDER DEN GUIDADE GENOMGÅNGEN
   const handleWizardReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || multiReviewStep === null || !sessionUser) return;
@@ -902,30 +897,6 @@ export default function HomePage() {
       }
     } catch (e) {
       console.error("Kunde inte hämta hushållsmedlemmar:", e);
-    }
-  };
-
-  const handleInviteMember = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedProperty || !inviteEmail.trim()) return;
-
-    setIsInviting(true);
-    try {
-      const { error } = await supabase.from("property_members").insert({
-        property_id: selectedProperty.id,
-        user_email: inviteEmail.trim(),
-        role: "member"
-      });
-
-      if (error) throw error;
-
-      setInviteEmail("");
-      await fetchPropertyMembers(selectedProperty.id);
-      showToast("Inbjudan skickad ✓");
-    } catch (err: any) {
-      alert(`Kunde inte bjuda in: ${err.message}`);
-    } finally {
-      setIsInviting(false);
     }
   };
 
@@ -1331,11 +1302,6 @@ export default function HomePage() {
     setMultiReviewStep(null);
     setHighlightedIndex(null);
 
-    if (!isPro && activeVaultItems.length >= FREE_ITEM_LIMIT) {
-      setShowProModal(true);
-      return;
-    }
-
     setIsAnalyzing(true);
     setScanMessageIndex(0);
     setIsTextFading(false);
@@ -1532,11 +1498,6 @@ export default function HomePage() {
       return;
     }
 
-    if (!isPro && activeVaultItems.length + itemsToSave.length > FREE_ITEM_LIMIT) {
-      setShowProModal(true);
-      return;
-    }
-
     setIsSaving(true);
     const totalAdded = itemsToSave.reduce((sum, item) => sum + (Number(item.estimated_replacement_cost_sek) || 0), 0);
 
@@ -1591,7 +1552,7 @@ export default function HomePage() {
               itemCroppedFileName = cropName;
             }
           } catch (cropErr) {
-            console.warn("Kunde inte beskära föremål:", cropErr);
+            console.warn("Kunde inte beskära föremål, använder översiktsbild:", cropErr);
           }
         }
 
@@ -1649,10 +1610,6 @@ export default function HomePage() {
       setShowAuthModal(true);
       return;
     }
-    if (!isPro && activeVaultItems.length >= FREE_ITEM_LIMIT) {
-      setShowProModal(true);
-      return;
-    }
     if (!manualFormData.title) return;
 
     setIsSavingManual(true);
@@ -1673,7 +1630,7 @@ export default function HomePage() {
       const repCost = Number(manualFormData.estimated_replacement_cost_sek) || 0;
       const mktVal = Number(manualFormData.market_value_sek) || Math.round(repCost * 0.5);
 
-      const { error: insertErr } = await supabase.from("items").insert({
+      const { data: insertedData, error: insertErr } = await supabase.from("items").insert({
         user_id: sessionUser.id,
         property_id: selectedProperty?.id || null,
         title: manualFormData.title,
@@ -1896,14 +1853,6 @@ export default function HomePage() {
             </div>
 
             <div className="flex items-center gap-2">
-              {!isPro && (
-                <button
-                  onClick={() => setShowProModal(true)}
-                  className="px-3 py-1.5 rounded-full bg-[var(--color-primary)] text-white text-xs font-extrabold shadow-xs"
-                >
-                  PRO
-                </button>
-              )}
               <button
                 onClick={() => {
                   if (!sessionUser) {
@@ -2112,7 +2061,6 @@ export default function HomePage() {
                 </p>
               </div>
 
-              {/* FOTOT MED NUMRERADE MARKÖRER (PINS) */}
               {previewUrl && (
                 <div className="relative rounded-3xl overflow-hidden bg-black border border-[var(--color-border)] shadow-md select-none">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -2153,7 +2101,6 @@ export default function HomePage() {
                 </div>
               )}
 
-              {/* LISTA MED MATCHADE NUMMERBRICKOR */}
               <div className="space-y-2 pt-1">
                 {multiResults.map((item, idx) => {
                   const isHighlighted = highlightedIndex === idx;
@@ -2172,7 +2119,6 @@ export default function HomePage() {
                         onClick={() => setMultiReviewStep(idx)}
                         className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer"
                       >
-                        {/* Numrerad cirkel som matchar fotot */}
                         <div className="w-7 h-7 rounded-full bg-[var(--color-primary)] text-white font-black text-xs flex items-center justify-center flex-shrink-0 shadow-xs">
                           {idx + 1}
                         </div>
@@ -2208,9 +2154,7 @@ export default function HomePage() {
                 })}
               </div>
 
-              {/* KNAPPAR: GUIDAD GENOMGÅNG ELLER SNABBSPARA */}
               <div className="pt-2 space-y-2.5">
-                {/* PRIMÄR: Starta den guidade genomgången */}
                 <button
                   type="button"
                   onClick={() => setMultiReviewStep(0)}
@@ -2220,7 +2164,6 @@ export default function HomePage() {
                   <ArrowRight className="w-5 h-5" />
                 </button>
 
-                {/* SEKUNDÄR: Spara alla direkt för den som har bråttom */}
                 <button
                   type="button"
                   onClick={() => executeSaveMultiItems(sessionUser?.id)}
@@ -2233,11 +2176,10 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* 2. DEN GUIDADE GENOMGÅNGEN (ETT FÖREMÅL I TAGET MED FULL KOLL) */}
+          {/* 2. DEN GUIDADE GENOMGÅNGEN */}
           {multiResults.length > 0 && !isAnalyzing && multiReviewStep !== null && (
             <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-200">
               
-              {/* STATUS & FÖRLOPPSMÄTARE */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <button 
@@ -2253,7 +2195,6 @@ export default function HomePage() {
                   </span>
                 </div>
 
-                {/* Grön förloppsbalk */}
                 <div className="w-full bg-[var(--color-border)] h-2.5 rounded-full overflow-hidden">
                   <div 
                     className="h-full bg-[var(--color-primary)] transition-all duration-300"
@@ -2262,7 +2203,6 @@ export default function HomePage() {
                 </div>
               </div>
 
-              {/* BILD PÅ DET AKTUELLA FÖREMÅLET */}
               <div className="relative h-64 rounded-3xl overflow-hidden bg-[var(--color-surface)] border border-[var(--color-border)] shadow-xs select-none">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img 
@@ -2280,7 +2220,6 @@ export default function HomePage() {
                 </div>
               </div>
 
-              {/* REDIGERINGSFÄLT FÖR JUST DETTA FÖREMÅL */}
               <div className="space-y-3">
                 <div>
                   <label className="font-semibold text-[var(--color-text-soft)] block mb-1.5 text-sm">Vad är detta för föremål?</label>
@@ -2303,7 +2242,6 @@ export default function HomePage() {
                     />
                   </div>
 
-                  {/* Kvitto-knapp i guiden */}
                   <div>
                     <label className="font-semibold text-[var(--color-text-soft)] block mb-1.5 text-sm">Kvitto (valfritt)</label>
                     <button
@@ -2329,7 +2267,6 @@ export default function HomePage() {
                 </div>
               </div>
 
-              {/* KNAPPAR I GUIDEN */}
               <div className="pt-2 space-y-2.5">
                 {multiReviewStep < multiResults.length - 1 ? (
                   <button
@@ -3556,7 +3493,7 @@ export default function HomePage() {
           </nav>
         )}
 
-        {/* MODALER (EXPORT, PRO, PROFIL, MM) */}
+        {/* MODALER (EXPORT, PROFIL, MM) */}
         {showExportModal && (
           <div 
             className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in"
@@ -3694,80 +3631,6 @@ export default function HomePage() {
           </div>
         )}
 
-        {showProModal && (
-          <div 
-            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in"
-            onClick={() => setShowProModal(false)}
-          >
-            <div 
-              className="bg-[var(--color-surface)] rounded-3xl p-6 w-full max-w-sm border border-[var(--color-border)] space-y-5 shadow-2xl animate-in slide-in-from-bottom"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex justify-between items-center">
-                <div className="w-12 h-12 rounded-2xl bg-[var(--color-primary-soft)] text-[var(--color-primary)] flex items-center justify-center font-black text-xl">
-                  PRO
-                </div>
-                <button onClick={() => setShowProModal(false)} className="text-[var(--color-text-soft)]">
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <div className="space-y-2 text-left">
-                <h3 className="text-xl font-extrabold text-[var(--color-text)]">
-                  Säkra hela ditt hem med BoValvet Pro
-                </h3>
-                <p className="text-sm text-[var(--color-text-soft)] leading-relaxed">
-                  Du har nått gränsen för gratisversionen ({FREE_ITEM_LIMIT} föremål). Lås upp alla funktioner och skydda dina värdesaker på riktigt:
-                </p>
-              </div>
-
-              <div className="space-y-2.5 text-sm font-medium text-[var(--color-text)] text-left">
-                <div className="flex items-center gap-2.5">
-                  <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                  <span>Obegränsat antal föremål och kvitton</span>
-                </div>
-                <div className="flex items-center gap-2.5">
-                  <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                  <span>Flera bostäder (t.ex. sommarstuga & förråd)</span>
-                </div>
-                <div className="flex items-center gap-2.5">
-                  <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                  <span>Hushållsdelning (dela valvet med partner)</span>
-                </div>
-                <div className="flex items-center gap-2.5">
-                  <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                  <span>Det skarpa skadepaketet & PDF-rapporter</span>
-                </div>
-              </div>
-
-              <div className="space-y-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsPro(true);
-                    setShowProModal(false);
-                    showToast("Pro aktiverat (Demoläge) ✓");
-                  }}
-                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98]"
-                >
-                  <span>Starta BoValvet Pro (349 kr/år)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsPro(true);
-                    setShowProModal(false);
-                    showToast("Pro aktiverat (Demoläge) ✓");
-                  }}
-                  className="min-h-[44px] w-full text-[var(--color-text-soft)] text-sm font-semibold hover:underline"
-                >
-                  eller 39 kr/mån (ingen bindningstid)
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {showProfileModal && (
           <div 
             className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in"
@@ -3787,7 +3650,7 @@ export default function HomePage() {
                       {displayName || "Min Profil"}
                     </h2>
                     <span className="text-xs text-[var(--color-text-soft)] block">
-                      {sessionUser?.email || "Inloggad"} {isPro ? "· Pro-användare" : ""}
+                      {sessionUser?.email || "Inloggad"}
                     </span>
                   </div>
                 </div>
@@ -3798,24 +3661,6 @@ export default function HomePage() {
                   <X className="w-5 h-5" />
                 </button>
               </div>
-
-              {!isPro && (
-                <div className="p-4 rounded-2xl bg-gradient-to-r from-[var(--color-primary-soft)] to-[var(--color-surface)] border border-[var(--color-primary)] flex items-center justify-between">
-                  <div>
-                    <b className="text-sm block">Uppgradera till Pro</b>
-                    <span className="text-xs text-[var(--color-text-soft)]">Lås upp obegränsade föremål & skadepaket</span>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setShowProfileModal(false);
-                      setShowProModal(true);
-                    }}
-                    className="px-4 py-2 rounded-xl bg-[var(--color-primary)] text-white text-xs font-bold shadow-xs"
-                  >
-                    Uppgradera
-                  </button>
-                </div>
-              )}
 
               <form onSubmit={handleSaveDisplayName} className="space-y-2 p-4 rounded-2xl bg-[var(--color-bg)] border border-[var(--color-border)]">
                 <label className="text-xs font-semibold text-[var(--color-text-soft)] block">Ditt namn i appen</label>
@@ -4071,7 +3916,7 @@ export default function HomePage() {
                   }}
                   className="w-full min-h-[72px] rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] p-4 flex items-center gap-3.5 text-left active:scale-[.98] transition"
                 >
-                  <span className="text-3xl">✍️️</span>
+                  <span className="text-3xl">✍️</span>
                   <div>
                     <b className="text-[17px] block">Lägg till själv</b>
                     <span className="text-[15px] text-[var(--color-text-soft)]">Privat, utan AI. Bra för smycken och konst</span>
