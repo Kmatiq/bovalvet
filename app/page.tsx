@@ -397,6 +397,7 @@ export default function HomePage() {
   const [isEditingProperty, setIsEditingProperty] = useState(false);
   const [propertyFormData, setPropertyFormData] = useState<Partial<Property>>({});
   const [isSavingProperty, setIsSavingProperty] = useState(false);
+  const [isDeletingProperty, setIsDeletingProperty] = useState(false);
 
   const [propertyMembers, setPropertyMembers] = useState<any[]>([]);
   const [inviteEmail, setInviteEmail] = useState("");
@@ -405,6 +406,7 @@ export default function HomePage() {
   const [activeRoom, setActiveRoom] = useState<string>("Vardagsrum");
   const [showRoomPickerScreen, setShowRoomPickerScreen] = useState(false);
   const [customRooms, setCustomRooms] = useState<string[]>([]);
+  const [removedRooms, setRemovedRooms] = useState<string[]>([]);
   const [showAddRoomForm, setShowAddRoomForm] = useState(false);
   const [newRoomNameInput, setNewRoomNameInput] = useState("");
 
@@ -422,7 +424,6 @@ export default function HomePage() {
   const [multiReviewStep, setMultiReviewStep] = useState<number | null>(null);
   const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
 
-  // SPAR-BEKRÄFTELSE MODAL (DOPAMINKORTET)
   const [savedSuccessInfo, setSavedSuccessInfo] = useState<{
     count: number;
     totalAddedSek: number;
@@ -498,21 +499,21 @@ export default function HomePage() {
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
+    setTimeout(() => setToastMessage(null), 3500);
   };
 
   const openEditItem = (item: VaultItem) => {
-    setEditingItem({ ...item });
+    setEditingItem({ ...item, property_id: item.property_id || selectedProperty?.id });
     setActiveImageIndex(0);
     setShowMoreItemDetails(Boolean(item.brand || item.model || item.serial_number || item.notes || item.purchase_store));
   };
 
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("bovalvet_custom_rooms");
-      if (saved) {
-        setCustomRooms(JSON.parse(saved));
-      }
+      const savedCustom = localStorage.getItem("bovalvet_custom_rooms");
+      if (savedCustom) setCustomRooms(JSON.parse(savedCustom));
+      const savedRemoved = localStorage.getItem("bovalvet_removed_rooms");
+      if (savedRemoved) setRemovedRooms(JSON.parse(savedRemoved));
     } catch (e) {
       console.error(e);
     }
@@ -527,12 +528,22 @@ export default function HomePage() {
       ...customRooms,
       ...activeVaultItems.map((i) => i.room).filter((r): r is string => Boolean(r) && r !== "Ospecificerat")
     ])
-  );
+  ).filter((r) => !removedRooms.includes(r));
 
   const handleCreateNewRoom = (e: React.FormEvent) => {
     e.preventDefault();
     const cleanName = newRoomNameInput.trim();
     if (!cleanName) return;
+
+    if (removedRooms.includes(cleanName)) {
+      const updatedRemoved = removedRooms.filter((r) => r !== cleanName);
+      setRemovedRooms(updatedRemoved);
+      try {
+        localStorage.setItem("bovalvet_removed_rooms", JSON.stringify(updatedRemoved));
+      } catch (err) {
+        console.error(err);
+      }
+    }
 
     if (!allRooms.includes(cleanName)) {
       const updated = [...customRooms, cleanName];
@@ -548,6 +559,109 @@ export default function HomePage() {
     setNewRoomNameInput("");
     setShowAddRoomForm(false);
     showToast(`Rummet "${cleanName}" har lagts till ✓`);
+  };
+
+  // PUNKT 4: RADERA ETT RUM (ENDAST OM DET ÄR TOMT)
+  const handleDeleteRoom = (roomNameToDelete: string) => {
+    const itemsInRoom = activeVaultItems.filter((i) => (i.room || "Ospecificerat") === roomNameToDelete);
+
+    if (itemsInRoom.length > 0) {
+      alert(
+        `Du kan inte ta bort rummet "${roomNameToDelete}" eftersom det innehåller ${itemsInRoom.length} ${
+          itemsInRoom.length === 1 ? "föremål" : "föremål"
+        }.\n\nFlytta eller radera föremålen först.`
+      );
+      return;
+    }
+
+    const confirmDelete = window.confirm(`Vill du ta bort det tomma rummet "${roomNameToDelete}"?`);
+    if (!confirmDelete) return;
+
+    const updatedRemoved = Array.from(new Set([...removedRooms, roomNameToDelete]));
+    setRemovedRooms(updatedRemoved);
+    try {
+      localStorage.setItem("bovalvet_removed_rooms", JSON.stringify(updatedRemoved));
+    } catch (err) {
+      console.error(err);
+    }
+
+    if (customRooms.includes(roomNameToDelete)) {
+      const updatedCustom = customRooms.filter((r) => r !== roomNameToDelete);
+      setCustomRooms(updatedCustom);
+      try {
+        localStorage.setItem("bovalvet_custom_rooms", JSON.stringify(updatedCustom));
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    setSelectedRoomFilter("Alla");
+    if (activeRoom === roomNameToDelete) {
+      setActiveRoom("Vardagsrum");
+    }
+    showToast(`Rummet "${roomNameToDelete}" har tagits bort ✓`);
+  };
+
+  // PUNKT 2: RADERA ETT HEM / BOSTAD (ENDAST OM DET ÄR TOMT)
+  const handleDeleteProperty = async (propertyToDelete: Property) => {
+    if (!sessionUser) return;
+
+    if (properties.length <= 1) {
+      alert("Du kan inte ta bort ditt enda hem. Du måste ha minst ett registrerat hem i ditt valv.");
+      return;
+    }
+
+    setIsDeletingProperty(true);
+    try {
+      const { count, error } = await supabase
+        .from("items")
+        .select("*", { count: "exact", head: true })
+        .eq("property_id", propertyToDelete.id);
+
+      if (error) throw error;
+
+      if (count && count > 0) {
+        alert(
+          `Du kan inte ta bort hemmet "${propertyToDelete.name}" eftersom det innehåller ${count} ${
+            count === 1 ? "föremål" : "föremål"
+          }.\n\nFlytta föremålen till ett annat hem eller radera dem först.`
+        );
+        setIsDeletingProperty(false);
+        return;
+      }
+
+      const confirmDelete = window.confirm(
+        `Är du säker på att du vill ta bort hemmet "${propertyToDelete.name}"?`
+      );
+      if (!confirmDelete) {
+        setIsDeletingProperty(false);
+        return;
+      }
+
+      const { error: delError } = await supabase
+        .from("properties")
+        .delete()
+        .eq("id", propertyToDelete.id);
+
+      if (delError) throw delError;
+
+      const remainingProps = properties.filter((p) => p.id !== propertyToDelete.id);
+      setProperties(remainingProps);
+
+      if (selectedProperty?.id === propertyToDelete.id) {
+        const nextProp = remainingProps[0];
+        setSelectedProperty(nextProp);
+        await fetchVaultStats(sessionUser.id, nextProp.id);
+        await fetchVaultItems(sessionUser.id, nextProp.id);
+      }
+
+      setIsEditingProperty(false);
+      showToast(`Hemmet "${propertyToDelete.name}" har tagits bort ✓`);
+    } catch (err: any) {
+      alert(`Kunde inte radera hemmet: ${err.message}`);
+    } finally {
+      setIsDeletingProperty(false);
+    }
   };
 
   const removeMultiItem = (indexToRemove: number) => {
@@ -1157,15 +1271,20 @@ export default function HomePage() {
     }
   };
 
+  // PUNKT 3: SPARAR FÖREMÅL SAMT FLYTTAR MELLAN HEM OM PROPERTY_ID ÄNDRATS
   const handleSaveItemUpdates = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingItem || !sessionUser) return;
 
     setIsUpdating(true);
     try {
+      const targetPropertyId = editingItem.property_id || selectedProperty?.id;
+      const movedToAnotherProperty = targetPropertyId !== selectedProperty?.id;
+
       await supabase
         .from("items")
         .update({
+          property_id: targetPropertyId,
           title: editingItem.title,
           brand: editingItem.brand,
           model: editingItem.model,
@@ -1185,10 +1304,17 @@ export default function HomePage() {
         })
         .eq("id", editingItem.id);
 
-      setVaultItems((prev) => prev.map((i) => (i.id === editingItem.id ? { ...editingItem } : i)));
+      if (movedToAnotherProperty) {
+        setVaultItems((prev) => prev.filter((i) => i.id !== editingItem.id));
+        const destinationName = properties.find((p) => p.id === targetPropertyId)?.name || "ett annat hem";
+        showToast(`"${editingItem.title}" flyttades till ${destinationName} ✓`);
+      } else {
+        setVaultItems((prev) => prev.map((i) => (i.id === editingItem.id ? { ...editingItem } : i)));
+        showToast("Ändringarna sparades ✓");
+      }
+
       await fetchVaultStats(sessionUser.id, selectedProperty?.id);
       setEditingItem(null);
-      showToast("Ändringarna sparades ✓");
     } catch (err: any) {
       alert(`Kunde inte uppdatera: ${err.message}`);
     } finally {
@@ -1576,7 +1702,7 @@ export default function HomePage() {
               itemCroppedFileName = cropName;
             }
           } catch (cropErr) {
-            console.warn("Kunde inte beskära föremål, använder översiktsbild:", cropErr);
+            console.warn("Kunde inte beskära föremål:", cropErr);
           }
         }
 
@@ -2430,7 +2556,6 @@ export default function HomePage() {
           {/* STARTSIDA (HEM) */}
           {!showRoomPickerScreen && !isAnalyzing && !result && multiResults.length === 0 && !editingItem && !showArchiveHub && currentNav === "home" && (
             <div className="space-y-6 animate-in fade-in">
-              {/* Om valvet är tomt: Varmt och enkelt Onboarding-läge */}
               {activeVaultItems.length === 0 ? (
                 <div className="space-y-5 pt-2">
                   <div>
@@ -2486,7 +2611,6 @@ export default function HomePage() {
                   </div>
                 </div>
               ) : (
-                /* Om det finns föremål: Instrumentpanelen */
                 <div className="space-y-6">
                   <div>
                     <h1 className="text-[26px] font-extrabold text-[var(--color-text)]">
@@ -2608,14 +2732,14 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* FLIKEN: VALVET (FÖRE DETTA "RUM") */}
+          {/* FLIKEN: VALVET */}
           {!showRoomPickerScreen && !isAnalyzing && !result && multiResults.length === 0 && !editingItem && !showArchiveHub && currentNav === "rooms" && (
             <div className="space-y-4 animate-in fade-in">
               <div className="flex items-center justify-between pt-1">
                 <div>
                   <h1 className="text-[24px] font-extrabold text-[var(--color-text)]">Ditt Valv</h1>
                   <span className="text-sm text-[var(--color-text-soft)]">
-                    {formatItemsCount(activeVaultItems.length)} säkrade i {selectedProperty?.name || "hemmet"}
+                    {formatItemsCount(activeVaultItems.length)} i {selectedProperty?.name || "hemmet"}
                   </span>
                 </div>
 
@@ -2664,6 +2788,23 @@ export default function HomePage() {
                 })}
               </div>
 
+              {/* PUNKT 4: Knapp för att radera aktivt rum */}
+              {selectedRoomFilter !== "Alla" && (
+                <div className="flex items-center justify-between px-1 text-sm">
+                  <span className="text-[var(--color-text-soft)] font-medium">
+                    Visar rum: <strong>{selectedRoomFilter}</strong>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteRoom(selectedRoomFilter)}
+                    className="text-rose-600 font-bold hover:underline flex items-center gap-1 text-xs py-1"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Ta bort rum</span>
+                  </button>
+                </div>
+              )}
+
               <div className="space-y-2.5 pt-1">
                 {filteredItemsByRoom.length === 0 ? (
                   <div className="text-center py-12 bg-[var(--color-surface)] rounded-3xl border border-[var(--color-border)] p-6 space-y-3">
@@ -2672,16 +2813,27 @@ export default function HomePage() {
                     <p className="text-[16px] text-[var(--color-text-soft)]">
                       Ta ett foto, så fyller vi i märke, modell och värde åt dig.
                     </p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setActiveRoom(selectedRoomFilter === "Alla" ? "Vardagsrum" : selectedRoomFilter);
-                        setShowRoomPickerScreen(true);
-                      }}
-                      className="min-h-[52px] px-6 rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base"
-                    >
-                      Fota i {selectedRoomFilter === "Alla" ? "Vardagsrum" : selectedRoomFilter}
-                    </button>
+                    <div className="pt-2 space-y-2 max-w-xs mx-auto">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveRoom(selectedRoomFilter === "Alla" ? "Vardagsrum" : selectedRoomFilter);
+                          setShowRoomPickerScreen(true);
+                        }}
+                        className="min-h-[52px] w-full px-6 rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base"
+                      >
+                        Fota i {selectedRoomFilter === "Alla" ? "Vardagsrum" : selectedRoomFilter}
+                      </button>
+                      {selectedRoomFilter !== "Alla" && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteRoom(selectedRoomFilter)}
+                          className="min-h-[44px] w-full text-rose-600 font-bold text-sm hover:underline"
+                        >
+                          Ta bort detta tomma rum
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ) : (
                   filteredItemsByRoom.map((item) => {
@@ -3142,17 +3294,33 @@ export default function HomePage() {
                   />
                 </div>
 
-                <div>
-                  <label className="font-semibold text-[var(--color-text-soft)] block mb-1.5 text-sm">Rum</label>
-                  <select
-                    value={editingItem.room || "Vardagsrum"}
-                    onChange={(e) => setEditingItem({ ...editingItem, room: e.target.value })}
-                    className="w-full min-h-[52px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)] font-medium"
-                  >
-                    {allRooms.map((r) => (
-                      <option key={r} value={r}>{r}</option>
-                    ))}
-                  </select>
+                {/* PUNKT 3: FLYTTA FÖREMÅL MELLAN HEM */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-semibold text-[var(--color-text-soft)] block mb-1.5 text-sm">Hem / Bostad</label>
+                    <select
+                      value={editingItem.property_id || selectedProperty?.id}
+                      onChange={(e) => setEditingItem({ ...editingItem, property_id: e.target.value })}
+                      className="w-full min-h-[52px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)] font-semibold"
+                    >
+                      {properties.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="font-semibold text-[var(--color-text-soft)] block mb-1.5 text-sm">Rum</label>
+                    <select
+                      value={editingItem.room || "Vardagsrum"}
+                      onChange={(e) => setEditingItem({ ...editingItem, room: e.target.value })}
+                      className="w-full min-h-[52px] px-3 text-base border border-[var(--color-border)] rounded-xl bg-[var(--color-surface)] text-[var(--color-text)] font-medium"
+                    >
+                      {allRooms.map((r) => (
+                        <option key={r} value={r}>{r}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
@@ -3484,7 +3652,6 @@ export default function HomePage() {
                 <span className="text-[13px]">Hem</span>
               </button>
 
-              {/* FLIK 2: VALVET (FÖRE DETTA "RUM") */}
               <button
                 type="button"
                 onClick={() => setCurrentNav("rooms")}
@@ -3632,6 +3799,7 @@ export default function HomePage() {
                   <ChevronRight className="w-5 h-5 text-[var(--color-text-soft)] opacity-40 group-hover:opacity-100 transition flex-shrink-0 ml-2" />
                 </button>
 
+                {/* PUNKT 1: SVENSK OCH TYDLIG TEXT ISTÄLLET FÖR EXCEL/NUMBERS */}
                 <button
                   type="button"
                   onClick={() => {
@@ -3652,10 +3820,10 @@ export default function HomePage() {
                     <span className="text-3xl">📊</span>
                     <div>
                       <b className="text-[16px] text-[var(--color-text)] block group-hover:text-[var(--color-primary)] transition">
-                        Kalkylark (Excel / Numbers)
+                        Kalkylark (tabellfil)
                       </b>
                       <span className="text-xs text-[var(--color-text-soft)] leading-snug block">
-                        En överskådlig tabell för dig som vill spara en lista på datorn eller arbeta vidare i Excel.
+                        En överskådlig tabell för dig som vill spara listan på datorn eller öppna i ett kalkylprogram.
                       </span>
                     </div>
                   </div>
@@ -4322,6 +4490,7 @@ export default function HomePage() {
           </div>
         )}
 
+        {/* MODAL: MINA BOSTÄDER MED MÖJLIGHET ATT RADERA (OM TOMT) */}
         {showPropertyModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in overflow-y-auto">
             <div className="bg-[var(--color-surface)] rounded-3xl p-5 w-full max-w-sm shadow-2xl border border-[var(--color-border)] space-y-4 my-8 max-h-[90vh] overflow-y-auto">
@@ -4493,13 +4662,28 @@ export default function HomePage() {
                     </div>
                   </div>
 
-                  <div className="pt-2 flex space-x-2">
-                    <button type="submit" disabled={isSavingProperty} className="flex-1 py-3 bg-[var(--color-primary)] text-white rounded-xl font-bold text-sm">
-                      {isSavingProperty ? "Sparar..." : "Spara"}
-                    </button>
-                    <button type="button" onClick={() => setIsEditingProperty(false)} className="px-4 py-3 bg-[var(--color-border)] text-[var(--color-text)] rounded-xl text-sm font-semibold">
-                      Tillbaka
-                    </button>
+                  <div className="pt-2 space-y-2">
+                    <div className="flex space-x-2">
+                      <button type="submit" disabled={isSavingProperty} className="flex-1 py-3 bg-[var(--color-primary)] text-white rounded-xl font-bold text-sm">
+                        {isSavingProperty ? "Sparar..." : "Spara"}
+                      </button>
+                      <button type="button" onClick={() => setIsEditingProperty(false)} className="px-4 py-3 bg-[var(--color-border)] text-[var(--color-text)] rounded-xl text-sm font-semibold">
+                        Tillbaka
+                      </button>
+                    </div>
+
+                    {/* PUNKT 2: KNAPP FÖR ATT RADERA HEM (OM DET REDAN ÄR SKAPAT) */}
+                    {propertyFormData.id && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteProperty(propertyFormData as Property)}
+                        disabled={isDeletingProperty}
+                        className="w-full py-2.5 text-rose-600 font-bold text-xs hover:bg-rose-50 rounded-xl transition flex items-center justify-center gap-1.5"
+                      >
+                        {isDeletingProperty ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                        <span>Radera detta hem</span>
+                      </button>
+                    )}
                   </div>
                 </form>
               )}
