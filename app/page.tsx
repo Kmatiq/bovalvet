@@ -59,14 +59,14 @@ import {
 } from "lucide-react";
 import { sanitizeAndCompressImage } from "@/lib/sanitizeImage";
 import { supabase } from "@/lib/supabaseClient";
-import { generateVaultPdf, generateIncidentPdf } from "@/lib/generatePdfReport";
+import { exportToCsv, exportToJson, generateVaultPdf, generateIncidentPdf } from "@/lib/exportVault";
 
 const STANDARD_ROOMS: Record<string, string> = {
-  "Vardagsrum": "🛋️️",
+  "Vardagsrum": "🛋️",
   "Kök": "🍳",
   "Badrum": "🛁",
   "Tvättstuga": "🧺",
-  "Sovrum": "🛏️",
+  "Sovrum": "🛏️️",
   "Hall": "🚪",
   "Förråd": "📦",
 };
@@ -225,7 +225,7 @@ function requiresManualOrCare(item: VaultItem): boolean {
 async function cropImageFromBox(
   imageSrc: string,
   box: [number, number, number, number],
-  paddingPercent: number = 0.06
+  paddingPercent: number = 0.20
 ): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -243,8 +243,8 @@ async function cropImageFromBox(
       let w = x2 - x1;
       let h = y2 - y1;
 
-      const padX = w * paddingPercent;
-      const padY = h * paddingPercent;
+      const padX = Math.max(w * paddingPercent, 35);
+      const padY = Math.max(h * paddingPercent, 35);
 
       x1 = Math.max(0, x1 - padX);
       y1 = Math.max(0, y1 - padY);
@@ -253,6 +253,20 @@ async function cropImageFromBox(
 
       w = x2 - x1;
       h = y2 - y1;
+
+      const minDimension = 280;
+      if (w < minDimension && origW >= minDimension) {
+        const diff = (minDimension - w) / 2;
+        x1 = Math.max(0, x1 - diff);
+        x2 = Math.min(origW, x2 + diff);
+        w = x2 - x1;
+      }
+      if (h < minDimension && origH >= minDimension) {
+        const diff = (minDimension - h) / 2;
+        y1 = Math.max(0, y1 - diff);
+        y2 = Math.min(origH, y2 + diff);
+        h = y2 - y1;
+      }
 
       const canvas = document.createElement("canvas");
       canvas.width = Math.max(1, Math.round(w));
@@ -263,6 +277,9 @@ async function cropImageFromBox(
         return reject(new Error("Kunde inte starta canvas-kontext"));
       }
 
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+
       ctx.drawImage(img, x1, y1, w, h, 0, 0, canvas.width, canvas.height);
       canvas.toBlob(
         (blob) => {
@@ -270,7 +287,7 @@ async function cropImageFromBox(
           else reject(new Error("Kunde inte beskära bild"));
         },
         "image/jpeg",
-        0.88
+        0.94
       );
     };
     img.onerror = (e) => reject(e);
@@ -342,6 +359,9 @@ export default function HomePage() {
 
   const [showAddActionSheet, setShowAddActionSheet] = useState(false);
   const [showEditPhotoOptions, setShowEditPhotoOptions] = useState(false);
+
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportRoomFilter, setExportRoomFilter] = useState<string>("Alla");
 
   const [showManualModal, setShowManualModal] = useState(false);
   const [manualFormData, setManualFormData] = useState<Partial<VaultItem>>({
@@ -1147,7 +1167,6 @@ export default function HomePage() {
 
       const response = await res.json();
       if (response.success && response.items) {
-        // Filtrera bort eventuella byggnader, spårvagnar eller orimliga priser
         const detected: ItemAnalysisResult[] = response.items.filter((item: ItemAnalysisResult) => {
           const isTooExpensive = item.estimated_replacement_cost_sek > 10_000_000;
           const isBuildingOrVehicle = /skyskrapa|byggnad|fastighet|spårvagn|tunnelbana|lokaltrafik|tåg/i.test(
@@ -1164,7 +1183,6 @@ export default function HomePage() {
           return;
         }
 
-        // Spara ALLTID omedelbart till gästminnet ifall användaren klickar på social OAuth-inloggning
         if (!sessionUser) {
           localStorage.setItem("bovalvet_pending_guest_item", JSON.stringify({
             result: detected.length === 1 ? detected[0] : null,
@@ -1469,7 +1487,6 @@ export default function HomePage() {
     setSocialLoading(provider);
     setAuthError(null);
 
-    // Säkerställ att aktuellt föremål och bild finns sparad i localStorage innan OAuth omdirigerar
     if (base64ForSave && (result || multiResults.length > 0)) {
       localStorage.setItem("bovalvet_pending_guest_item", JSON.stringify({
         result,
@@ -2300,7 +2317,7 @@ export default function HomePage() {
               <div className="bg-[var(--color-surface)] rounded-3xl p-5 border border-[var(--color-border)] shadow-card space-y-2">
                 <span className="text-[15px] text-[var(--color-text-soft)] font-semibold block">Så här står du</span>
                 <div className="text-[20px] text-[var(--color-text)]">
-                  <strong>{totalValuationSek.toLocaleString("sv-SE")} kr</strong> säkrat av <strong>{Number(selectedProperty?.coverage_limit_sek || 1000000).toLocaleString("sv-SE")} kr</strong>
+                  <strong>{totalValuationSek.toLocaleString("sv-SE")} kr</strong> inventerat av <strong>{Number(selectedProperty?.coverage_limit_sek || 1000000).toLocaleString("sv-SE")} kr</strong>
                 </div>
                 <p className="text-[16px] text-[var(--color-text-soft)]">
                   Du kan fortsätta lägga till föremål när som helst.
@@ -2319,11 +2336,11 @@ export default function HomePage() {
 
                 <button
                   type="button"
-                  onClick={() => generateVaultPdf(activeVaultItems, displayName || sessionUser?.email || "Användare", totalValuationSek)}
-                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-surface)] text-[var(--color-text)] border border-[var(--color-border)] font-bold text-base flex items-center justify-center gap-2 shadow-card"
+                  onClick={() => setShowExportModal(true)}
+                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-surface)] text-[var(--color-text)] border border-[var(--color-border)] font-bold text-base flex items-center justify-center gap-2 shadow-card hover:bg-[var(--color-primary-soft)] transition"
                 >
-                  <FileDown className="w-5 h-5" />
-                  <span>Ladda ner inventarielista (PDF)</span>
+                  <FileDown className="w-5 h-5 text-[var(--color-primary)]" />
+                  <span>Exportera inventering & underlag</span>
                 </button>
               </div>
 
@@ -2996,6 +3013,174 @@ export default function HomePage() {
               </button>
             </div>
           </nav>
+        )}
+
+        {showExportModal && (
+          <div 
+            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in"
+            onClick={() => setShowExportModal(false)}
+          >
+            <div 
+              className="bg-[var(--color-surface)] rounded-t-[32px] sm:rounded-3xl p-6 w-full max-w-[460px] border border-[var(--color-border)] space-y-5 max-h-[90vh] overflow-y-auto shadow-2xl animate-in slide-in-from-bottom"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between pb-2 border-b border-[var(--color-border)]">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-2xl bg-[var(--color-primary-soft)] text-[var(--color-primary)] flex items-center justify-center font-bold">
+                    <Download className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-[19px] font-extrabold text-[var(--color-text)]">
+                      Exportera underlag
+                    </h2>
+                    <span className="text-xs text-[var(--color-text-soft)] block">
+                      Välj format för försäkringsbolag eller egen säkerhetskopia
+                    </span>
+                  </div>
+                </div>
+                <button onClick={() => setShowExportModal(false)} className="text-[var(--color-text-soft)] p-2">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-[var(--color-text-soft)] block mb-1.5">
+                  VÄLJ OMFÅNG ATT EXPORTERA:
+                </label>
+                <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                  <button
+                    type="button"
+                    onClick={() => setExportRoomFilter("Alla")}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-bold border transition ${
+                      exportRoomFilter === "Alla"
+                        ? "bg-[var(--color-primary)] text-white border-[var(--color-primary)]"
+                        : "bg-[var(--color-bg)] border-[var(--color-border)] text-[var(--color-text)]"
+                    }`}
+                  >
+                    Hela hemmet ({activeVaultItems.length})
+                  </button>
+                  {roomKeys.map((r) => {
+                    const rCount = activeVaultItems.filter((i) => i.room === r).length;
+                    if (rCount === 0) return null;
+                    return (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => setExportRoomFilter(r)}
+                        className={`px-3.5 py-1.5 rounded-full text-xs font-bold border transition ${
+                          exportRoomFilter === r
+                            ? "bg-[var(--color-primary)] text-white border-[var(--color-primary)]"
+                            : "bg-[var(--color-bg)] border-[var(--color-border)] text-[var(--color-text)]"
+                        }`}
+                      >
+                        {r} ({rCount})
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const itemsToExport = exportRoomFilter === "Alla" 
+                      ? activeVaultItems 
+                      : activeVaultItems.filter((i) => i.room === exportRoomFilter);
+                    const sumCost = itemsToExport.reduce((sum, i) => sum + (Number(i.estimated_replacement_cost_sek) || 0), 0);
+                    
+                    generateVaultPdf(
+                      itemsToExport, 
+                      displayName || sessionUser?.email || "Användare", 
+                      sumCost, 
+                      selectedProperty
+                    );
+                    setShowExportModal(false);
+                    showToast("PDF-rapport har skapats ✓");
+                  }}
+                  className="w-full p-4 rounded-2xl bg-[var(--color-bg)] border border-[var(--color-border)] hover:border-[var(--color-primary)] text-left flex items-center justify-between group transition shadow-2xs"
+                >
+                  <div className="flex items-center gap-3.5">
+                    <span className="text-3xl">📄</span>
+                    <div>
+                      <b className="text-[16px] text-[var(--color-text)] block group-hover:text-[var(--color-primary)] transition">
+                        Officiell PDF-rapport
+                      </b>
+                      <span className="text-xs text-[var(--color-text-soft)]">
+                        Stämplat försäkringsunderlag med delsummor och tabell
+                      </span>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-[var(--color-text-soft)] opacity-40 group-hover:opacity-100 transition" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const itemsToExport = exportRoomFilter === "Alla" 
+                      ? activeVaultItems 
+                      : activeVaultItems.filter((i) => i.room === exportRoomFilter);
+                    
+                    exportToCsv(
+                      itemsToExport, 
+                      `BoValvet-${selectedProperty?.name || "Hemmet"}-${exportRoomFilter}.csv`
+                    );
+                    setShowExportModal(false);
+                    showToast("Excel/CSV-fil har laddats ner ✓");
+                  }}
+                  className="w-full p-4 rounded-2xl bg-[var(--color-bg)] border border-[var(--color-border)] hover:border-[var(--color-primary)] text-left flex items-center justify-between group transition shadow-2xs"
+                >
+                  <div className="flex items-center gap-3.5">
+                    <span className="text-3xl">📊</span>
+                    <div>
+                      <b className="text-[16px] text-[var(--color-text)] block group-hover:text-[var(--color-primary)] transition">
+                        Excel / Kalkylark (.CSV)
+                      </b>
+                      <span className="text-xs text-[var(--color-text-soft)]">
+                        Öppnas direkt i Excel med svenska tecken och rena kolumner
+                      </span>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-[var(--color-text-soft)] opacity-40 group-hover:opacity-100 transition" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const itemsToExport = exportRoomFilter === "Alla" 
+                      ? activeVaultItems 
+                      : activeVaultItems.filter((i) => i.room === exportRoomFilter);
+                    
+                    exportToJson(
+                      itemsToExport, 
+                      selectedProperty, 
+                      displayName || sessionUser?.email
+                    );
+                    setShowExportModal(false);
+                    showToast("JSON-säkerhetskopia sparad ✓");
+                  }}
+                  className="w-full p-4 rounded-2xl bg-[var(--color-bg)] border border-[var(--color-border)] hover:border-[var(--color-primary)] text-left flex items-center justify-between group transition shadow-2xs"
+                >
+                  <div className="flex items-center gap-3.5">
+                    <span className="text-3xl">💾</span>
+                    <div>
+                      <b className="text-[16px] text-[var(--color-text)] block group-hover:text-[var(--color-primary)] transition">
+                        Komplett rådatabackup (.JSON)
+                      </b>
+                      <span className="text-xs text-[var(--color-text-soft)]">
+                        Strukturerad datadump för säker förvaring på egen hårddisk
+                      </span>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-[var(--color-text-soft)] opacity-40 group-hover:opacity-100 transition" />
+                </button>
+              </div>
+
+              <p className="text-[11px] text-[var(--color-text-soft)] text-center leading-relaxed">
+                Inga känsliga personuppgifter skickas till tredjepart. Alla exporter genereras helt lokalt i din webbläsare.
+              </p>
+            </div>
+          </div>
         )}
 
         {showProModal && (
