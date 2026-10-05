@@ -262,19 +262,19 @@ async function cropImageFromBox(
       let x2 = (xmax / 1000) * origW;
       let y2 = (ymax / 1000) * origH;
 
-      const padX = Math.max(wBox(x1, x2) * paddingPercent, 35);
-      const padY = Math.max(hBox(y1, y2) * paddingPercent, 35);
+      let w = x2 - x1;
+      let h = y2 - y1;
 
-      function wBox(a: number, b: number) { return b - a; }
-      function hBox(a: number, b: number) { return b - a; }
+      const padX = Math.max(w * paddingPercent, 35);
+      const padY = Math.max(h * paddingPercent, 35);
 
       x1 = Math.max(0, x1 - padX);
       y1 = Math.max(0, y1 - padY);
       x2 = Math.min(origW, x2 + padX);
       y2 = Math.min(origH, y2 + padY);
 
-      let w = x2 - x1;
-      let h = y2 - y1;
+      w = x2 - x1;
+      h = y2 - y1;
 
       const minDimension = 280;
       if (w < minDimension && origW >= minDimension) {
@@ -428,6 +428,13 @@ export default function HomePage() {
   const [multiResults, setMultiResults] = useState<ItemAnalysisResult[]>([]);
   const [selectedMultiIndices, setSelectedMultiIndices] = useState<number[]>([]);
   const [multiReviewStep, setMultiReviewStep] = useState<number | null>(null);
+
+  // SPAR-BEKRÄFTELSE (DOPAMINKORTET)
+  const [savedSuccessInfo, setSavedSuccessInfo] = useState<{
+    count: number;
+    totalAddedSek: number;
+    room: string;
+  } | null>(null);
 
   const [totalValuationSek, setTotalValuationSek] = useState<number>(0);
   const [vaultItems, setVaultItems] = useState<VaultItem[]>([]);
@@ -1416,6 +1423,7 @@ export default function HomePage() {
     }
   };
 
+  // 1-KLICKS SPARANDE: ENSKILT FÖREMÅL MED SPAR-BEKRÄFTELSE
   const executeSaveAiItem = async (userId: string) => {
     if (!result || !base64ForSave) return;
 
@@ -1432,6 +1440,7 @@ export default function HomePage() {
     }
 
     setIsSaving(true);
+    const addedValue = Number(result.estimated_replacement_cost_sek) || 0;
 
     try {
       const byteCharacters = atob(base64ForSave);
@@ -1470,18 +1479,12 @@ export default function HomePage() {
       setPreviewUrl(null);
       setBase64ForSave(null);
 
-      if (insertedData) {
-        const { data: urlData } = await supabase.storage.from("item-photos").createSignedUrl(fileName, 3600);
-        const savedItemWithUrl: VaultItem = {
-          ...insertedData,
-          image_paths: [fileName],
-          imageUrls: [urlData?.signedUrl || ""],
-          imageUrl: urlData?.signedUrl || "",
-        };
-        openEditItem(savedItemWithUrl);
-      }
-
-      showToast(`Sparat i ${activeRoom} ✓`);
+      // Visa dopaminkortet direkt
+      setSavedSuccessInfo({
+        count: 1,
+        totalAddedSek: addedValue,
+        room: activeRoom,
+      });
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1489,6 +1492,7 @@ export default function HomePage() {
     }
   };
 
+  // 1-KLICKS SPARANDE: FLERA FÖREMÅL MED SPAR-BEKRÄFTELSE
   const executeSaveMultiItems = async (userId?: string) => {
     const itemsToSave = multiResults;
     if (itemsToSave.length === 0 || !base64ForSave || !previewUrl) return;
@@ -1511,6 +1515,8 @@ export default function HomePage() {
     }
 
     setIsSaving(true);
+    const totalAdded = itemsToSave.reduce((sum, item) => sum + (Number(item.estimated_replacement_cost_sek) || 0), 0);
+
     try {
       const byteCharacters = atob(base64ForSave);
       const byteNumbers = new Array(byteCharacters.length);
@@ -1595,13 +1601,19 @@ export default function HomePage() {
       await fetchVaultStats(userId, selectedProperty?.id);
       await fetchVaultItems(userId, selectedProperty?.id);
 
+      const savedCount = itemsToSave.length;
       setMultiResults([]);
       setSelectedMultiIndices([]);
       setMultiReviewStep(null);
       setPreviewUrl(null);
       setBase64ForSave(null);
 
-      showToast(`${itemsToSave.length} föremål sparades med närbilder i ${activeRoom} ✓`);
+      // Visa dopaminkortet direkt
+      setSavedSuccessInfo({
+        count: savedCount,
+        totalAddedSek: totalAdded,
+        room: activeRoom,
+      });
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1668,21 +1680,12 @@ export default function HomePage() {
       setManualPhotoFile(null);
       setManualPhotoPreview(null);
 
-      if (insertedData) {
-        let signed = "";
-        if (uploadedFileName) {
-          const { data: uData } = await supabase.storage.from("item-photos").createSignedUrl(uploadedFileName, 3600);
-          signed = uData?.signedUrl || "";
-        }
-        openEditItem({
-          ...insertedData,
-          image_paths: uploadedFileName ? [uploadedFileName] : [],
-          imageUrls: signed ? [signed] : [],
-          imageUrl: signed
-        });
-      }
-
-      showToast("Föremålet sparades ✓");
+      // Visa dopaminkortet
+      setSavedSuccessInfo({
+        count: 1,
+        totalAddedSek: repCost,
+        room: manualFormData.room || activeRoom,
+      });
     } catch (err: any) {
       alert(`Kunde inte spara: ${err.message}`);
     } finally {
@@ -3309,6 +3312,79 @@ export default function HomePage() {
           )}
         </main>
 
+        {/* SPAR-BEKRÄFTELSE MODAL (DOPAMINKORTET) */}
+        {savedSuccessInfo && (
+          <div 
+            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in"
+          >
+            <div 
+              className="bg-[var(--color-surface)] rounded-t-[32px] sm:rounded-3xl p-6 w-full max-w-[440px] border border-[var(--color-border)] space-y-5 shadow-2xl text-center animate-in slide-in-from-bottom"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="w-16 h-16 rounded-full bg-[var(--color-success-bg)] text-[var(--color-success-text)] flex items-center justify-center mx-auto text-3xl font-black shadow-xs">
+                ✓
+              </div>
+
+              <div className="space-y-1">
+                <span className="text-sm font-bold text-[var(--color-primary)] uppercase tracking-wider block">
+                  Sparat i {savedSuccessInfo.room} {getRoomEmoji(savedSuccessInfo.room)}
+                </span>
+                <h2 className="text-3xl font-black text-[var(--color-text)]">
+                  +{savedSuccessInfo.totalAddedSek.toLocaleString("sv-SE")} kr
+                </h2>
+                <p className="text-base text-[var(--color-text-soft)] leading-relaxed">
+                  {savedSuccessInfo.count === 1 
+                    ? "Föremålet har lagts till och säkrats i ditt valv." 
+                    : `${savedSuccessInfo.count} föremål har lagts till och säkrats i ditt valv.`}
+                </p>
+              </div>
+
+              <div className="space-y-2.5 pt-2">
+                {/* 1. Primärknapp: Fota direkt nästa föremål i samma rum */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const room = savedSuccessInfo.room;
+                    setSavedSuccessInfo(null);
+                    setActiveRoom(room);
+                    cameraInputRef.current?.click();
+                  }}
+                  className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98]"
+                >
+                  <Camera className="w-5 h-5" />
+                  <span>Fota nästa i {savedSuccessInfo.room}</span>
+                </button>
+
+                {/* 2. Sekundärknapp: Se föremålen i rummet */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const room = savedSuccessInfo.room;
+                    setSavedSuccessInfo(null);
+                    setSelectedRoomFilter(room);
+                    setCurrentNav("rooms");
+                  }}
+                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] font-bold text-base flex items-center justify-center gap-2 hover:bg-[var(--color-bg)] transition active:scale-[.98]"
+                >
+                  <span>Se alla föremål i {savedSuccessInfo.room}</span>
+                </button>
+
+                {/* 3. Tertiärknapp: Klar / Hem */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSavedSuccessInfo(null);
+                    setCurrentNav("home");
+                  }}
+                  className="min-h-[44px] w-full text-[var(--color-text-soft)] font-semibold text-base hover:text-[var(--color-text)] transition"
+                >
+                  Klar (Gå till översikten)
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* BOTTENNAVIGERING */}
         {!showRoomPickerScreen && !isAnalyzing && !result && multiResults.length === 0 && !editingItem && !showArchiveHub && (
           <nav className="fixed bottom-0 left-0 right-0 md:left-1/2 md:-translate-x-1/2 md:max-w-[480px] md:border-x z-40 bg-[var(--color-surface)] border-t border-[var(--color-border)] h-[70px] flex items-center justify-around px-2 shadow-sm">
@@ -3371,7 +3447,7 @@ export default function HomePage() {
           </nav>
         )}
 
-        {/* MODALER (EXPORT, PRO, PROFIL, MM) */}
+        {/* ÖVRIGA MODALER (EXPORT, PRO, PROFIL, MM) */}
         {showExportModal && (
           <div 
             className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in"
@@ -3886,7 +3962,7 @@ export default function HomePage() {
                   }}
                   className="w-full min-h-[72px] rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] p-4 flex items-center gap-3.5 text-left active:scale-[.98] transition"
                 >
-                  <span className="text-3xl">✍️️</span>
+                  <span className="text-3xl">✍️</span>
                   <div>
                     <b className="text-[17px] block">Lägg till själv</b>
                     <span className="text-[15px] text-[var(--color-text-soft)]">Privat, utan AI. Bra för smycken och konst</span>
