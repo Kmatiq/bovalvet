@@ -1640,8 +1640,8 @@ export default function HomePage() {
   const avatarLetter = (displayName || sessionUser?.email || "K").trim()[0].toUpperCase();
 
   return (
-    <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)] flex justify-center selection:bg-[var(--color-primary-soft)] selection:text-[var(--color-primary)]">
-      <div className="w-full max-w-[480px] min-h-screen flex flex-col relative pb-32">
+    <div className="min-h-screen bg-[var(--color-bg)] md:bg-[#EDE7DE] text-[var(--color-text)] flex justify-center selection:bg-[var(--color-primary-soft)] selection:text-[var(--color-primary)]">
+      <div className="w-full max-w-[480px] min-h-screen flex flex-col relative pb-32 bg-[var(--color-bg)] md:shadow-md md:border-x md:border-[var(--color-border)]">
 
         {!isOnline && (
           <div className="bg-amber-600 text-white text-xs font-bold px-4 py-2 text-center flex items-center justify-center gap-2 z-30">
@@ -2955,7 +2955,7 @@ export default function HomePage() {
         </main>
 
         {!showRoomPickerScreen && !isAnalyzing && !result && multiResults.length === 0 && !editingItem && !showArchiveHub && (
-          <nav className="fixed bottom-0 left-0 right-0 z-40 bg-[var(--color-surface)] border-t border-[var(--color-border)] h-[70px] flex items-center justify-around px-2 shadow-sm">
+          <nav className="fixed bottom-0 left-0 right-0 md:left-1/2 md:-translate-x-1/2 md:max-w-[480px] md:border-x z-40 bg-[var(--color-surface)] border-t border-[var(--color-border)] h-[70px] flex items-center justify-around px-2 shadow-sm">
             <div className="w-full max-w-[480px] mx-auto flex items-center justify-around">
               <button
                 type="button"

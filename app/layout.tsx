@@ -2,7 +2,10 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const viewport: Viewport = {
-  themeColor: "#0d1311",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#FAF6F1" },
+    { media: "(prefers-color-scheme: dark)", color: "#141917" },
+  ],
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
@@ -15,7 +18,7 @@ export const metadata: Metadata = {
   applicationName: "BoValvet",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "black-translucent",
+    statusBarStyle: "default",
     title: "BoValvet",
   },
   icons: {
@@ -38,7 +41,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="sv">
-      <body className="antialiased bg-[#0d1311]">{children}</body>
+      <body className="antialiased bg-[var(--color-bg)] text-[var(--color-text)]">{children}</body>
     </html>
   );
 }
