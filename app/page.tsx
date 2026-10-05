@@ -58,7 +58,8 @@ import {
   Share2,
   SlidersHorizontal,
   MapPin,
-  FolderPlus
+  FolderPlus,
+  ArrowRight
 } from "lucide-react";
 import { sanitizeAndCompressImage } from "@/lib/sanitizeImage";
 import { supabase } from "@/lib/supabaseClient";
@@ -67,7 +68,7 @@ import { exportToCsv, generateVaultPdf, generateIncidentPdf } from "@/lib/export
 const STANDARD_ROOMS: Record<string, string> = {
   "Vardagsrum": "🛋️",
   "Kök": "🍳",
-  "Sovrum": "🛏️",
+  "Sovrum": "🛏️️",
   "Garderob": "👗",
   "Hall": "🚪",
   "Badrum": "🛁",
@@ -142,6 +143,8 @@ interface ItemAnalysisResult {
   confidence: number;
   box_2d?: [number, number, number, number];
   previewCropUrl?: string;
+  tempReceiptPath?: string;
+  tempReceiptPreview?: string;
 }
 
 interface VaultItem {
@@ -262,19 +265,16 @@ async function cropImageFromBox(
       let x2 = (xmax / 1000) * origW;
       let y2 = (ymax / 1000) * origH;
 
-      let w = x2 - x1;
-      let h = y2 - y1;
-
-      const padX = Math.max(w * paddingPercent, 35);
-      const padY = Math.max(h * paddingPercent, 35);
+      const padX = Math.max((x2 - x1) * paddingPercent, 35);
+      const padY = Math.max((y2 - y1) * paddingPercent, 35);
 
       x1 = Math.max(0, x1 - padX);
       y1 = Math.max(0, y1 - padY);
       x2 = Math.min(origW, x2 + padX);
       y2 = Math.min(origH, y2 + padY);
 
-      w = x2 - x1;
-      h = y2 - y1;
+      let w = x2 - x1;
+      let h = y2 - y1;
 
       const minDimension = 280;
       if (w < minDimension && origW >= minDimension) {
@@ -335,19 +335,16 @@ async function cropImageToDataUrl(
       let x2 = (xmax / 1000) * origW;
       let y2 = (ymax / 1000) * origH;
 
-      let w = x2 - x1;
-      let h = y2 - y1;
-
-      const padX = Math.max(w * paddingPercent, 40);
-      const padY = Math.max(h * paddingPercent, 40);
+      const padX = Math.max((x2 - x1) * paddingPercent, 40);
+      const padY = Math.max((y2 - y1) * paddingPercent, 40);
 
       x1 = Math.max(0, x1 - padX);
       y1 = Math.max(0, y1 - padY);
       x2 = Math.min(origW, x2 + padX);
       y2 = Math.min(origH, y2 + padY);
 
-      w = x2 - x1;
-      h = y2 - y1;
+      let w = x2 - x1;
+      let h = y2 - y1;
 
       const minDimension = 280;
       if (w < minDimension && origW >= minDimension) {
@@ -426,10 +423,10 @@ export default function HomePage() {
 
   const [result, setResult] = useState<ItemAnalysisResult | null>(null);
   const [multiResults, setMultiResults] = useState<ItemAnalysisResult[]>([]);
-  const [selectedMultiIndices, setSelectedMultiIndices] = useState<number[]>([]);
   const [multiReviewStep, setMultiReviewStep] = useState<number | null>(null);
+  const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
 
-  // SPAR-BEKRÄFTELSE (DOPAMINKORTET)
+  // SPAR-BEKRÄFTELSE MODAL
   const [savedSuccessInfo, setSavedSuccessInfo] = useState<{
     count: number;
     totalAddedSek: number;
@@ -498,6 +495,7 @@ export default function HomePage() {
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const receiptInputRef = useRef<HTMLInputElement>(null);
+  const wizardReceiptInputRef = useRef<HTMLInputElement>(null);
   const manualPhotoInputRef = useRef<HTMLInputElement>(null);
   const editItemCameraInputRef = useRef<HTMLInputElement>(null);
   const editItemGalleryInputRef = useRef<HTMLInputElement>(null);
@@ -568,11 +566,6 @@ export default function HomePage() {
       }
       return updated;
     });
-    setSelectedMultiIndices((prev) =>
-      prev
-        .filter((i) => i !== indexToRemove)
-        .map((i) => (i > indexToRemove ? i - 1 : i))
-    );
   };
 
   const updateMultiItemField = (
@@ -583,6 +576,40 @@ export default function HomePage() {
     setMultiResults((prev) =>
       prev.map((item, idx) => (idx === index ? { ...item, [field]: value } : item))
     );
+  };
+
+  // KVITTO-UPPLADDNING UNDER DEN GUIDADE GENOMGÅNGEN
+  const handleWizardReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || multiReviewStep === null || !sessionUser) return;
+
+    setIsAnalyzingReceipt(true);
+    try {
+      const processed = await sanitizeAndCompressImage(file);
+      const byteCharacters = atob(processed.base64ForGemini);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: "image/jpeg" });
+      const receiptFileName = `${sessionUser.id}/receipt-${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`;
+
+      await supabase.storage.from("item-photos").upload(receiptFileName, blob, { contentType: "image/jpeg", upsert: true });
+
+      setMultiResults((prev) =>
+        prev.map((item, idx) =>
+          idx === multiReviewStep
+            ? { ...item, tempReceiptPath: receiptFileName, tempReceiptPreview: processed.previewUrl }
+            : item
+        )
+      );
+
+      showToast("Kvitto bifogat ✓");
+    } catch (err: any) {
+      alert(`Kunde inte ladda upp kvitto: ${err.message}`);
+    } finally {
+      setIsAnalyzingReceipt(false);
+      if (wizardReceiptInputRef.current) wizardReceiptInputRef.current.value = "";
+    }
   };
 
   useEffect(() => {
@@ -1301,7 +1328,8 @@ export default function HomePage() {
     setShowRoomPickerScreen(false);
     setResult(null);
     setMultiResults([]);
-    setSelectedMultiIndices([]);
+    setMultiReviewStep(null);
+    setHighlightedIndex(null);
 
     if (!isPro && activeVaultItems.length >= FREE_ITEM_LIMIT) {
       setShowProModal(true);
@@ -1380,7 +1408,6 @@ export default function HomePage() {
           }
           setResult(single);
           setMultiResults([]);
-          setSelectedMultiIndices([0]);
           setMultiReviewStep(null);
         } else if (detected.length > 1) {
           const withCrops = await Promise.all(
@@ -1397,7 +1424,6 @@ export default function HomePage() {
             })
           );
           setMultiResults(withCrops);
-          setSelectedMultiIndices(withCrops.map((_, idx) => idx));
           setMultiReviewStep(null);
           showToast(`Hittade ${withCrops.length} föremål i ${activeRoom}!`);
         }
@@ -1423,7 +1449,6 @@ export default function HomePage() {
     }
   };
 
-  // 1-KLICKS SPARANDE: ENSKILT FÖREMÅL MED SPAR-BEKRÄFTELSE
   const executeSaveAiItem = async (userId: string) => {
     if (!result || !base64ForSave) return;
 
@@ -1452,7 +1477,7 @@ export default function HomePage() {
 
       await supabase.storage.from("item-photos").upload(fileName, blob, { contentType: "image/jpeg", upsert: true });
 
-      const { data: insertedData, error: insertErr } = await supabase.from("items").insert({
+      const { error: insertErr } = await supabase.from("items").insert({
         user_id: userId,
         property_id: selectedProperty?.id || null,
         title: result.title,
@@ -1479,7 +1504,6 @@ export default function HomePage() {
       setPreviewUrl(null);
       setBase64ForSave(null);
 
-      // Visa dopaminkortet direkt
       setSavedSuccessInfo({
         count: 1,
         totalAddedSek: addedValue,
@@ -1492,7 +1516,6 @@ export default function HomePage() {
     }
   };
 
-  // 1-KLICKS SPARANDE: FLERA FÖREMÅL MED SPAR-BEKRÄFTELSE
   const executeSaveMultiItems = async (userId?: string) => {
     const itemsToSave = multiResults;
     if (itemsToSave.length === 0 || !base64ForSave || !previewUrl) return;
@@ -1568,7 +1591,7 @@ export default function HomePage() {
               itemCroppedFileName = cropName;
             }
           } catch (cropErr) {
-            console.warn("Kunde inte beskära föremål, använder översiktsbild:", cropErr);
+            console.warn("Kunde inte beskära föremål:", cropErr);
           }
         }
 
@@ -1588,6 +1611,7 @@ export default function HomePage() {
           market_value_sek: Number(item.market_value_sek) || 0,
           condition: item.condition || "Mycket gott",
           serial_number_hint: item.serial_number_hint || "",
+          receipt_path: item.tempReceiptPath || null,
           image_path: itemCroppedFileName,
           photo_path: itemCroppedFileName,
           image_paths: finalImagePaths,
@@ -1603,12 +1627,10 @@ export default function HomePage() {
 
       const savedCount = itemsToSave.length;
       setMultiResults([]);
-      setSelectedMultiIndices([]);
       setMultiReviewStep(null);
       setPreviewUrl(null);
       setBase64ForSave(null);
 
-      // Visa dopaminkortet direkt
       setSavedSuccessInfo({
         count: savedCount,
         totalAddedSek: totalAdded,
@@ -1651,7 +1673,7 @@ export default function HomePage() {
       const repCost = Number(manualFormData.estimated_replacement_cost_sek) || 0;
       const mktVal = Number(manualFormData.market_value_sek) || Math.round(repCost * 0.5);
 
-      const { data: insertedData, error: insertErr } = await supabase.from("items").insert({
+      const { error: insertErr } = await supabase.from("items").insert({
         user_id: sessionUser.id,
         property_id: selectedProperty?.id || null,
         title: manualFormData.title,
@@ -1680,7 +1702,6 @@ export default function HomePage() {
       setManualPhotoFile(null);
       setManualPhotoPreview(null);
 
-      // Visa dopaminkortet
       setSavedSuccessInfo({
         count: 1,
         totalAddedSek: repCost,
@@ -1700,7 +1721,7 @@ export default function HomePage() {
     if (base64ForSave && (result || multiResults.length > 0)) {
       localStorage.setItem("bovalvet_pending_guest_item", JSON.stringify({
         result,
-        multiResults: multiResults.length > 0 ? multiResults.filter((_, idx) => selectedMultiIndices.includes(idx)) : null,
+        multiResults: multiResults.length > 0 ? multiResults : null,
         base64ForSave,
         room: activeRoom
       }));
@@ -1904,6 +1925,7 @@ export default function HomePage() {
         <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleImageSelected} className="hidden" />
         <input ref={galleryInputRef} type="file" accept="image/*" onChange={handleImageSelected} className="hidden" />
         <input ref={receiptInputRef} type="file" accept="image/*" onChange={handleReceiptUpload} className="hidden" />
+        <input ref={wizardReceiptInputRef} type="file" accept="image/*" capture="environment" onChange={handleWizardReceiptUpload} className="hidden" />
         <input ref={manualPhotoInputRef} type="file" accept="image/*" onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) {
@@ -1916,7 +1938,7 @@ export default function HomePage() {
 
         <main className="flex-1 px-5 pt-1 space-y-6 overflow-y-auto">
 
-          {/* RUMSVÄLJARE (MED GARDEROB & EGET RUM) */}
+          {/* RUMSVÄLJARE */}
           {showRoomPickerScreen && !isAnalyzing && !result && multiResults.length === 0 && !editingItem && !showArchiveHub && (
             <div className="space-y-4 animate-in fade-in pt-2">
               <button 
@@ -2055,7 +2077,7 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* MULTI-RESULTAT (ÖVERSIKTSVY UTAN POINT-AND-PICK) */}
+          {/* 1. MULTI-RESULTAT: ÖVERSIKTSVY MED NUMRERADE PINS DIREKT PÅ FOTOT */}
           {multiResults.length > 0 && !isAnalyzing && multiReviewStep === null && (
             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-200">
               <div className="flex items-center justify-between">
@@ -2063,7 +2085,6 @@ export default function HomePage() {
                   type="button"
                   onClick={() => {
                     setMultiResults([]);
-                    setSelectedMultiIndices([]);
                     setPreviewUrl(null);
                     setBase64ForSave(null);
                   }} 
@@ -2087,125 +2108,179 @@ export default function HomePage() {
                   Hittade {multiResults.length} föremål i {activeRoom}
                 </h1>
                 <p className="text-sm text-[var(--color-text-soft)] mt-0.5">
-                  Uppskattat sammanlagt nypris: <strong className="text-[var(--color-text)] font-extrabold">{multiResults.reduce((sum, item) => sum + (Number(item.estimated_replacement_cost_sek) || 0), 0).toLocaleString("sv-SE")} kr</strong>
+                  Sammanlagt nypris: <strong className="text-[var(--color-text)] font-extrabold">{multiResults.reduce((sum, item) => sum + (Number(item.estimated_replacement_cost_sek) || 0), 0).toLocaleString("sv-SE")} kr</strong>
                 </p>
               </div>
 
+              {/* FOTOT MED NUMRERADE MARKÖRER (PINS) */}
               {previewUrl && (
-                <div className="relative rounded-3xl overflow-hidden bg-black/5 border border-[var(--color-border)] shadow-xs select-none">
+                <div className="relative rounded-3xl overflow-hidden bg-black border border-[var(--color-border)] shadow-md select-none">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={previewUrl} alt="Översiktsbild" className="w-full h-auto max-h-[200px] object-cover block mx-auto" />
-                  <div className="absolute bottom-2.5 right-2.5 bg-black/60 backdrop-blur-md px-3 py-1 rounded-full text-xs font-semibold text-white">
-                    Översiktsfoto
+                  <img src={previewUrl} alt="Översiktsfoto" className="w-full h-auto max-h-[300px] object-contain block mx-auto opacity-95" />
+                  
+                  {multiResults.map((item, idx) => {
+                    if (!item.box_2d || item.box_2d.length < 4) return null;
+                    const [ymin, xmin, ymax, xmax] = item.box_2d;
+                    const isHighlighted = highlightedIndex === idx;
+
+                    return (
+                      <div
+                        key={idx}
+                        onClick={() => setMultiReviewStep(idx)}
+                        style={{
+                          top: `${(ymin / 1000) * 100}%`,
+                          left: `${(xmin / 1000) * 100}%`,
+                          width: `${Math.max(10, ((xmax - xmin) / 1000) * 100)}%`,
+                          height: `${Math.max(8, ((ymax - ymin) / 1000) * 100)}%`,
+                        }}
+                        className={`absolute border-2 rounded-xl cursor-pointer transition-all duration-200 flex items-start justify-start p-1 ${
+                          isHighlighted 
+                            ? "border-[var(--color-primary)] bg-[var(--color-primary)]/35 ring-4 ring-white" 
+                            : "border-white/80 bg-black/25 hover:border-[var(--color-primary)] hover:bg-black/40"
+                        }`}
+                        title={item.title}
+                      >
+                        <span className="w-6 h-6 rounded-full bg-[var(--color-primary)] text-white text-xs font-black flex items-center justify-center shadow-lg border border-white">
+                          {idx + 1}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  
+                  <div className="absolute bottom-2.5 right-2.5 bg-black/70 backdrop-blur-md px-3 py-1 rounded-full text-xs font-semibold text-white pointer-events-none">
+                    Klicka på en siffra eller lista för att granska
                   </div>
                 </div>
               )}
 
-              <div className="space-y-2.5 pt-1">
-                {multiResults.map((item, idx) => (
-                  <div 
-                    key={idx}
-                    className="p-3 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] shadow-card flex items-center justify-between gap-3 transition"
-                  >
+              {/* LISTA MED MATCHADE NUMMERBRICKOR */}
+              <div className="space-y-2 pt-1">
+                {multiResults.map((item, idx) => {
+                  const isHighlighted = highlightedIndex === idx;
+                  return (
                     <div 
-                      onClick={() => setMultiReviewStep(idx)}
-                      className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer"
+                      key={idx}
+                      onMouseEnter={() => setHighlightedIndex(idx)}
+                      onMouseLeave={() => setHighlightedIndex(null)}
+                      className={`p-3 rounded-2xl border transition flex items-center justify-between gap-3 ${
+                        isHighlighted 
+                          ? "bg-[var(--color-primary-soft)] border-[var(--color-primary)] shadow-card" 
+                          : "bg-[var(--color-surface)] border-[var(--color-border)] shadow-xs"
+                      }`}
                     >
-                      <div className="w-14 h-14 rounded-xl bg-[var(--color-primary-soft)] border border-[var(--color-border)] overflow-hidden flex-shrink-0 flex items-center justify-center">
-                        {item.previewCropUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={item.previewCropUrl} alt={item.title} className="w-full h-full object-cover" />
-                        ) : (
-                          <span className="text-xl">{getRoomEmoji(activeRoom)}</span>
-                        )}
+                      <div 
+                        onClick={() => setMultiReviewStep(idx)}
+                        className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer"
+                      >
+                        {/* Numrerad cirkel som matchar fotot */}
+                        <div className="w-7 h-7 rounded-full bg-[var(--color-primary)] text-white font-black text-xs flex items-center justify-center flex-shrink-0 shadow-xs">
+                          {idx + 1}
+                        </div>
+
+                        <div className="w-12 h-12 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border)] overflow-hidden flex-shrink-0 flex items-center justify-center">
+                          {item.previewCropUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={item.previewCropUrl} alt={item.title} className="w-full h-full object-cover" />
+                          ) : (
+                            <span className="text-xl">{getRoomEmoji(activeRoom)}</span>
+                          )}
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <b className="text-base text-[var(--color-text)] block truncate">{item.title}</b>
+                          <span className="text-sm font-extrabold text-[var(--color-text)] block">
+                            {Number(item.estimated_replacement_cost_sek).toLocaleString("sv-SE")} kr
+                          </span>
+                        </div>
                       </div>
 
-                      <div className="min-w-0 flex-1">
-                        <b className="text-base text-[var(--color-text)] block truncate">{item.title}</b>
-                        <span className="text-sm font-extrabold text-[var(--color-text)] block">
-                          {Number(item.estimated_replacement_cost_sek).toLocaleString("sv-SE")} kr
-                        </span>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeMultiItem(idx)}
+                        className="w-10 h-10 rounded-xl flex items-center justify-center text-[var(--color-text-soft)] hover:text-rose-600 hover:bg-rose-50 transition active:scale-95 flex-shrink-0"
+                        title="Ta bort föremål"
+                        aria-label={`Ta bort ${item.title}`}
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
                     </div>
-
-                    <button
-                      type="button"
-                      onClick={() => removeMultiItem(idx)}
-                      className="w-10 h-10 rounded-xl flex items-center justify-center text-[var(--color-text-soft)] hover:text-rose-600 hover:bg-rose-50 transition active:scale-95 flex-shrink-0"
-                      title="Ta bort föremål"
-                      aria-label={`Ta bort ${item.title}`}
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
+              {/* KNAPPAR: GUIDAD GENOMGÅNG ELLER SNABBSPARA */}
               <div className="pt-2 space-y-2.5">
+                {/* PRIMÄR: Starta den guidade genomgången */}
+                <button
+                  type="button"
+                  onClick={() => setMultiReviewStep(0)}
+                  className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-extrabold text-base flex items-center justify-center gap-2.5 shadow-md active:scale-[.98] transition"
+                >
+                  <span>Gå igenom föremålen steg för steg (1 av {multiResults.length})</span>
+                  <ArrowRight className="w-5 h-5" />
+                </button>
+
+                {/* SEKUNDÄR: Spara alla direkt för den som har bråttom */}
                 <button
                   type="button"
                   onClick={() => executeSaveMultiItems(sessionUser?.id)}
                   disabled={isSaving || multiResults.length === 0}
-                  className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98] disabled:opacity-50"
+                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] font-bold text-base text-[var(--color-text)] flex items-center justify-center gap-2 shadow-2xs hover:bg-[var(--color-primary-soft)] transition active:scale-[.98]"
                 >
-                  {isSaving ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                  ) : (
-                    <span>
-                      {sessionUser 
-                        ? `Spara alla ${multiResults.length} föremål i ${activeRoom}` 
-                        : "Logga in och spara alla föremål"}
-                    </span>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setMultiReviewStep(0)}
-                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] font-bold text-base text-[var(--color-text)] flex items-center justify-center gap-2 shadow-2xs hover:bg-[var(--color-primary-soft)] transition"
-                >
-                  <span>Granska ett och ett (1 av {multiResults.length}) →</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => cameraInputRef.current?.click()}
-                  className="min-h-[44px] w-full text-[var(--color-text-soft)] text-base font-semibold hover:text-[var(--color-text)] transition"
-                >
-                  Fota om
+                  {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <span>Spara alla {multiResults.length} direkt som de är</span>}
                 </button>
               </div>
             </div>
           )}
 
-          {/* MULTI-RESULTAT (STEGNINGSLÄGE ETT OCH ETT) */}
+          {/* 2. DEN GUIDADE GENOMGÅNGEN (ETT FÖREMÅL I TAGET MED FULL KOLL) */}
           {multiResults.length > 0 && !isAnalyzing && multiReviewStep !== null && (
             <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-200">
-              <div className="flex items-center justify-between">
-                <button 
-                  type="button"
-                  onClick={() => setMultiReviewStep(null)} 
-                  className="min-h-[44px] flex items-center gap-1 text-[var(--color-primary)] font-bold text-base -ml-1"
-                >
-                  ← Tillbaka till översikten
-                </button>
-                <span className="text-sm font-bold px-3 py-1 rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
-                  Föremål {multiReviewStep + 1} av {multiResults.length}
-                </span>
+              
+              {/* STATUS & FÖRLOPPSMÄTARE */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <button 
+                    type="button"
+                    onClick={() => setMultiReviewStep(null)} 
+                    className="min-h-[44px] flex items-center gap-1 text-[var(--color-primary)] font-bold text-base -ml-1"
+                  >
+                    ← Tillbaka till översikten
+                  </button>
+
+                  <span className="text-sm font-extrabold px-3 py-1.5 rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
+                    Föremål {multiReviewStep + 1} av {multiResults.length}
+                  </span>
+                </div>
+
+                {/* Grön förloppsbalk */}
+                <div className="w-full bg-[var(--color-border)] h-2.5 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-[var(--color-primary)] transition-all duration-300"
+                    style={{ width: `${((multiReviewStep + 1) / multiResults.length) * 100}%` }}
+                  />
+                </div>
               </div>
 
-              <div className="relative h-60 rounded-3xl overflow-hidden bg-[var(--color-surface)] border border-[var(--color-border)] shadow-xs select-none">
+              {/* BILD PÅ DET AKTUELLA FÖREMÅLET */}
+              <div className="relative h-64 rounded-3xl overflow-hidden bg-[var(--color-surface)] border border-[var(--color-border)] shadow-xs select-none">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img 
                   src={multiResults[multiReviewStep]?.previewCropUrl || previewUrl || ""} 
                   alt={multiResults[multiReviewStep]?.title || "Föremål"} 
                   className="w-full h-full object-cover" 
                 />
+                
+                <div className="absolute top-3 left-3 w-8 h-8 rounded-full bg-[var(--color-primary)] text-white font-black text-sm flex items-center justify-center shadow-md border-2 border-white">
+                  {multiReviewStep + 1}
+                </div>
+
                 <div className="absolute bottom-3 left-3 bg-white/95 backdrop-blur-md px-3.5 py-1.5 rounded-full shadow-xs border border-stone-200 text-slate-800 text-sm font-semibold">
                   Placeras i: <strong>{activeRoom}</strong>
                 </div>
               </div>
 
+              {/* REDIGERINGSFÄLT FÖR JUST DETTA FÖREMÅL */}
               <div className="space-y-3">
                 <div>
                   <label className="font-semibold text-[var(--color-text-soft)] block mb-1.5 text-sm">Vad är detta för föremål?</label>
@@ -2217,23 +2292,50 @@ export default function HomePage() {
                   />
                 </div>
 
-                <div>
-                  <label className="font-semibold text-[var(--color-text-soft)] block mb-1.5 text-sm">Nypris idag (SEK)</label>
-                  <input 
-                    type="number" 
-                    value={multiResults[multiReviewStep]?.estimated_replacement_cost_sek || ""} 
-                    onChange={(e) => updateMultiItemField(multiReviewStep, "estimated_replacement_cost_sek", Number(e.target.value))}
-                    className="w-full min-h-[52px] px-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] font-extrabold text-lg text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-semibold text-[var(--color-text-soft)] block mb-1.5 text-sm">Nypris idag (SEK)</label>
+                    <input 
+                      type="number" 
+                      value={multiResults[multiReviewStep]?.estimated_replacement_cost_sek || ""} 
+                      onChange={(e) => updateMultiItemField(multiReviewStep, "estimated_replacement_cost_sek", Number(e.target.value))}
+                      className="w-full min-h-[52px] px-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] font-extrabold text-lg text-[var(--color-text)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+                    />
+                  </div>
+
+                  {/* Kvitto-knapp i guiden */}
+                  <div>
+                    <label className="font-semibold text-[var(--color-text-soft)] block mb-1.5 text-sm">Kvitto (valfritt)</label>
+                    <button
+                      type="button"
+                      onClick={() => wizardReceiptInputRef.current?.click()}
+                      disabled={isAnalyzingReceipt}
+                      className={`w-full min-h-[52px] px-3 rounded-2xl border text-sm font-bold flex items-center justify-center gap-1.5 transition active:scale-95 ${
+                        multiResults[multiReviewStep]?.tempReceiptPath
+                          ? "bg-[var(--color-success-bg)] text-[var(--color-success-text)] border-emerald-300"
+                          : "bg-[var(--color-surface)] border-[var(--color-border)] text-[var(--color-text)]"
+                      }`}
+                    >
+                      {isAnalyzingReceipt ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <>
+                          <Receipt className="w-4 h-4 text-[var(--color-primary)]" />
+                          <span>{multiResults[multiReviewStep]?.tempReceiptPath ? "Kvitto sparat ✓" : "+ Fota kvitto"}</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
 
+              {/* KNAPPAR I GUIDEN */}
               <div className="pt-2 space-y-2.5">
                 {multiReviewStep < multiResults.length - 1 ? (
                   <button
                     type="button"
                     onClick={() => setMultiReviewStep(multiReviewStep + 1)}
-                    className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98]"
+                    className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-extrabold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98]"
                   >
                     <span>Godkänn & Nästa ({multiReviewStep + 2} av {multiResults.length}) →</span>
                   </button>
@@ -2242,24 +2344,34 @@ export default function HomePage() {
                     type="button"
                     onClick={() => executeSaveMultiItems(sessionUser?.id)}
                     disabled={isSaving}
-                    className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98]"
+                    className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-extrabold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98]"
                   >
-                    {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <span>Spara alla i {activeRoom} ✓</span>}
+                    {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <span>Klart! Spara alla föremål i {activeRoom} ✓</span>}
                   </button>
                 )}
 
-                <button
-                  type="button"
-                  onClick={() => removeMultiItem(multiReviewStep)}
-                  className="min-h-[48px] w-full text-rose-600 font-semibold text-base hover:bg-rose-50 rounded-2xl transition"
-                >
-                  Ta bort detta föremål
-                </button>
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => removeMultiItem(multiReviewStep)}
+                    className="min-h-[48px] rounded-2xl text-rose-600 font-semibold text-sm hover:bg-rose-50 border border-transparent transition"
+                  >
+                    Ta bort detta föremål
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => executeSaveMultiItems(sessionUser?.id)}
+                    className="min-h-[48px] rounded-2xl text-[var(--color-text-soft)] font-semibold text-sm hover:bg-[var(--color-bg)] border border-[var(--color-border)] transition"
+                  >
+                    Spara resten direkt ⚡
+                  </button>
+                </div>
               </div>
             </div>
           )}
 
-          {/* ENKELT FÖREMÅL */}
+          {/* 3. ENKELT FÖREMÅL */}
           {result && !isAnalyzing && multiResults.length === 0 && (
             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-200">
               <button 
@@ -2777,7 +2889,7 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* KUNSKAP & MER-FLIKEN */}
+          {/* KUNSKAP & MER */}
           {!showRoomPickerScreen && !isAnalyzing && !result && multiResults.length === 0 && !editingItem && !showArchiveHub && currentNav === "more" && (
             <div className="space-y-5 animate-in fade-in">
               <div>
@@ -2961,7 +3073,7 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* REDIGERA FÖREMÅL (LESS IS MORE + ACCORDION) */}
+          {/* REDIGERA FÖREMÅL */}
           {editingItem && !showArchiveHub && (
             <div className="space-y-4 animate-in fade-in pt-1 pb-6">
               <div className="flex items-center justify-between bg-[var(--color-primary-soft)] p-3 rounded-2xl border border-[var(--color-border)]">
@@ -3340,7 +3452,6 @@ export default function HomePage() {
               </div>
 
               <div className="space-y-2.5 pt-2">
-                {/* 1. Primärknapp: Fota direkt nästa föremål i samma rum */}
                 <button
                   type="button"
                   onClick={() => {
@@ -3355,7 +3466,6 @@ export default function HomePage() {
                   <span>Fota nästa i {savedSuccessInfo.room}</span>
                 </button>
 
-                {/* 2. Sekundärknapp: Se föremålen i rummet */}
                 <button
                   type="button"
                   onClick={() => {
@@ -3369,7 +3479,6 @@ export default function HomePage() {
                   <span>Se alla föremål i {savedSuccessInfo.room}</span>
                 </button>
 
-                {/* 3. Tertiärknapp: Klar / Hem */}
                 <button
                   type="button"
                   onClick={() => {
@@ -3447,7 +3556,7 @@ export default function HomePage() {
           </nav>
         )}
 
-        {/* ÖVRIGA MODALER (EXPORT, PRO, PROFIL, MM) */}
+        {/* MODALER (EXPORT, PRO, PROFIL, MM) */}
         {showExportModal && (
           <div 
             className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in"
@@ -3962,7 +4071,7 @@ export default function HomePage() {
                   }}
                   className="w-full min-h-[72px] rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] p-4 flex items-center gap-3.5 text-left active:scale-[.98] transition"
                 >
-                  <span className="text-3xl">✍️</span>
+                  <span className="text-3xl">✍️️</span>
                   <div>
                     <b className="text-[17px] block">Lägg till själv</b>
                     <span className="text-[15px] text-[var(--color-text-soft)]">Privat, utan AI. Bra för smycken och konst</span>
