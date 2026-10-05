@@ -59,14 +59,14 @@ import {
 } from "lucide-react";
 import { sanitizeAndCompressImage } from "@/lib/sanitizeImage";
 import { supabase } from "@/lib/supabaseClient";
-import { exportToCsv, exportToJson, generateVaultPdf, generateIncidentPdf } from "@/lib/exportVault";
+import { exportToCsv, generateVaultPdf, generateIncidentPdf } from "@/lib/exportVault";
 
 const STANDARD_ROOMS: Record<string, string> = {
   "Vardagsrum": "🛋️",
   "Kök": "🍳",
   "Badrum": "🛁",
   "Tvättstuga": "🧺",
-  "Sovrum": "🛏️️",
+  "Sovrum": "🛏️",
   "Hall": "🚪",
   "Förråd": "📦",
 };
@@ -2340,7 +2340,7 @@ export default function HomePage() {
                   className="min-h-[52px] w-full rounded-2xl bg-[var(--color-surface)] text-[var(--color-text)] border border-[var(--color-border)] font-bold text-base flex items-center justify-center gap-2 shadow-card hover:bg-[var(--color-primary-soft)] transition"
                 >
                   <FileDown className="w-5 h-5 text-[var(--color-primary)]" />
-                  <span>Exportera inventering & underlag</span>
+                  <span>Spara eller dela förteckning</span>
                 </button>
               </div>
 
@@ -2540,7 +2540,7 @@ export default function HomePage() {
                   {openGuideCard === "privacy" && (
                     <div className="px-5 pb-5 pt-1 space-y-3 border-t border-[var(--color-border)] text-[15px] text-[var(--color-text)] leading-relaxed">
                       <p>
-                        <strong>Lokal EXIF-tvätt:</strong> Innan en bild laddas upp raderas all GPS- och kameradata direkt i din webbläsare. Ingen platsdata sparas någonsin i molnet.
+                        <strong>Lokal bildsäkring:</strong> Innan en bild laddas upp raderas all känslig plats- och GPS-data direkt i din webbläsare. Ingen positionsdata sparas i molnet.
                       </p>
                     </div>
                   )}
@@ -3015,6 +3015,7 @@ export default function HomePage() {
           </nav>
         )}
 
+        {/* SPARA OCH DELA (RENSAD FRÅN JSON OCH TEKNISK JARGONG) */}
         {showExportModal && (
           <div 
             className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in"
@@ -3031,10 +3032,10 @@ export default function HomePage() {
                   </div>
                   <div>
                     <h2 className="text-[19px] font-extrabold text-[var(--color-text)]">
-                      Exportera underlag
+                      Spara eller dela förteckning
                     </h2>
                     <span className="text-xs text-[var(--color-text-soft)] block">
-                      Välj format för försäkringsbolag eller egen säkerhetskopia
+                      Välj hur du vill ta ut dina inventarier
                     </span>
                   </div>
                 </div>
@@ -3043,9 +3044,10 @@ export default function HomePage() {
                 </button>
               </div>
 
+              {/* Rumsurval */}
               <div>
                 <label className="text-xs font-bold text-[var(--color-text-soft)] block mb-1.5">
-                  VÄLJ OMFÅNG ATT EXPORTERA:
+                  VILKA FÖREMÅL VILL DU HA MED?
                 </label>
                 <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
                   <button
@@ -3080,7 +3082,9 @@ export default function HomePage() {
                 </div>
               </div>
 
-              <div className="space-y-2.5 pt-1">
+              {/* Endast 2 val: PDF och Kalkylark */}
+              <div className="space-y-3 pt-1">
+                {/* 1. PDF för försäkringsbolag */}
                 <button
                   type="button"
                   onClick={() => {
@@ -3096,7 +3100,7 @@ export default function HomePage() {
                       selectedProperty
                     );
                     setShowExportModal(false);
-                    showToast("PDF-rapport har skapats ✓");
+                    showToast("PDF-dokumentet har skapats ✓");
                   }}
                   className="w-full p-4 rounded-2xl bg-[var(--color-bg)] border border-[var(--color-border)] hover:border-[var(--color-primary)] text-left flex items-center justify-between group transition shadow-2xs"
                 >
@@ -3104,16 +3108,17 @@ export default function HomePage() {
                     <span className="text-3xl">📄</span>
                     <div>
                       <b className="text-[16px] text-[var(--color-text)] block group-hover:text-[var(--color-primary)] transition">
-                        Officiell PDF-rapport
+                        Färdig PDF-rapport
                       </b>
-                      <span className="text-xs text-[var(--color-text-soft)]">
-                        Stämplat försäkringsunderlag med delsummor och tabell
+                      <span className="text-xs text-[var(--color-text-soft)] leading-snug block">
+                        Prydligt dokument med datumstämpel och värden. Perfekt att mejla till försäkringsbolaget eller skriva ut.
                       </span>
                     </div>
                   </div>
-                  <ChevronRight className="w-5 h-5 text-[var(--color-text-soft)] opacity-40 group-hover:opacity-100 transition" />
+                  <ChevronRight className="w-5 h-5 text-[var(--color-text-soft)] opacity-40 group-hover:opacity-100 transition flex-shrink-0 ml-2" />
                 </button>
 
+                {/* 2. Kalkylark för Excel / Numbers */}
                 <button
                   type="button"
                   onClick={() => {
@@ -3126,7 +3131,7 @@ export default function HomePage() {
                       `BoValvet-${selectedProperty?.name || "Hemmet"}-${exportRoomFilter}.csv`
                     );
                     setShowExportModal(false);
-                    showToast("Excel/CSV-fil har laddats ner ✓");
+                    showToast("Kalkylarket har laddats ner ✓");
                   }}
                   className="w-full p-4 rounded-2xl bg-[var(--color-bg)] border border-[var(--color-border)] hover:border-[var(--color-primary)] text-left flex items-center justify-between group transition shadow-2xs"
                 >
@@ -3134,50 +3139,19 @@ export default function HomePage() {
                     <span className="text-3xl">📊</span>
                     <div>
                       <b className="text-[16px] text-[var(--color-text)] block group-hover:text-[var(--color-primary)] transition">
-                        Excel / Kalkylark (.CSV)
+                        Kalkylark (Excel / Numbers)
                       </b>
-                      <span className="text-xs text-[var(--color-text-soft)]">
-                        Öppnas direkt i Excel med svenska tecken och rena kolumner
+                      <span className="text-xs text-[var(--color-text-soft)] leading-snug block">
+                        En överskådlig tabell för dig som vill spara en lista på datorn eller arbeta vidare i Excel.
                       </span>
                     </div>
                   </div>
-                  <ChevronRight className="w-5 h-5 text-[var(--color-text-soft)] opacity-40 group-hover:opacity-100 transition" />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    const itemsToExport = exportRoomFilter === "Alla" 
-                      ? activeVaultItems 
-                      : activeVaultItems.filter((i) => i.room === exportRoomFilter);
-                    
-                    exportToJson(
-                      itemsToExport, 
-                      selectedProperty, 
-                      displayName || sessionUser?.email
-                    );
-                    setShowExportModal(false);
-                    showToast("JSON-säkerhetskopia sparad ✓");
-                  }}
-                  className="w-full p-4 rounded-2xl bg-[var(--color-bg)] border border-[var(--color-border)] hover:border-[var(--color-primary)] text-left flex items-center justify-between group transition shadow-2xs"
-                >
-                  <div className="flex items-center gap-3.5">
-                    <span className="text-3xl">💾</span>
-                    <div>
-                      <b className="text-[16px] text-[var(--color-text)] block group-hover:text-[var(--color-primary)] transition">
-                        Komplett rådatabackup (.JSON)
-                      </b>
-                      <span className="text-xs text-[var(--color-text-soft)]">
-                        Strukturerad datadump för säker förvaring på egen hårddisk
-                      </span>
-                    </div>
-                  </div>
-                  <ChevronRight className="w-5 h-5 text-[var(--color-text-soft)] opacity-40 group-hover:opacity-100 transition" />
+                  <ChevronRight className="w-5 h-5 text-[var(--color-text-soft)] opacity-40 group-hover:opacity-100 transition flex-shrink-0 ml-2" />
                 </button>
               </div>
 
               <p className="text-[11px] text-[var(--color-text-soft)] text-center leading-relaxed">
-                Inga känsliga personuppgifter skickas till tredjepart. Alla exporter genereras helt lokalt i din webbläsare.
+                Allt skapas tryggt och direkt i din webbläsare.
               </p>
             </div>
           </div>

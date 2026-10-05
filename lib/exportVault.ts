@@ -34,7 +34,7 @@ export interface PropertyMeta {
 }
 
 // -------------------------------------------------------------
-// 1. EXCEL / CSV EXPORT
+// 1. KALKYLARK (EXCEL / APPLE NUMBERS / GOOGLE SHEETS)
 // -------------------------------------------------------------
 export function exportToCsv(items: VaultExportItem[], filename = "bovalvet-inventering.csv") {
   const headers = [
@@ -79,6 +79,7 @@ export function exportToCsv(items: VaultExportItem[], filename = "bovalvet-inven
     escapeCell(i.notes || "")
   ]);
 
+  // Semikolon och UTF-8 BOM (\uFEFF) gör att filen öppnas i prydliga kolumner med ÅÄÖ
   const csvContent = "\uFEFF" + [headers.join(";"), ...rows.map((r) => r.join(";"))].join("\r\n");
 
   const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -93,59 +94,7 @@ export function exportToCsv(items: VaultExportItem[], filename = "bovalvet-inven
 }
 
 // -------------------------------------------------------------
-// 2. FULLSTÄNDIG JSON BACKUP
-// -------------------------------------------------------------
-export function exportToJson(
-  items: VaultExportItem[],
-  property?: PropertyMeta | null,
-  userIdentifier?: string
-) {
-  const exportPayload = {
-    app: "BoValvet",
-    export_version: "2.0",
-    generated_at: new Date().toISOString(),
-    owner: userIdentifier || "Anonym",
-    property: property || null,
-    summary: {
-      total_items: items.length,
-      total_replacement_cost_sek: items.reduce((sum, i) => sum + (Number(i.estimated_replacement_cost_sek) || 0), 0),
-      total_market_value_sek: items.reduce((sum, i) => sum + (Number(i.market_value_sek) || 0), 0),
-      items_with_receipts: items.filter((i) => Boolean(i.receipt_path)).length,
-    },
-    items: items.map((i) => ({
-      id: i.id,
-      title: i.title,
-      room: i.room || "Ospecificerat",
-      category: i.category || "Övrigt",
-      brand: i.brand || null,
-      model: i.model || null,
-      condition: i.condition || "Gott",
-      estimated_replacement_cost_sek: Number(i.estimated_replacement_cost_sek) || 0,
-      market_value_sek: Number(i.market_value_sek) || 0,
-      purchase_date: i.purchase_date || null,
-      purchase_store: i.purchase_store || null,
-      purchase_price_sek: i.purchase_price_sek ? Number(i.purchase_price_sek) : null,
-      warranty_months: i.warranty_months || 36,
-      has_receipt: Boolean(i.receipt_path),
-      serial_number: i.serial_number || null,
-      notes: i.notes || null,
-    }))
-  };
-
-  const jsonString = JSON.stringify(exportPayload, null, 2);
-  const blob = new Blob([jsonString], { type: "application/json;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.setAttribute("href", url);
-  link.setAttribute("download", `bovalvet-backup-${new Date().toISOString().split("T")[0]}.json`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-}
-
-// -------------------------------------------------------------
-// 3. PROFESSIONELL INVENTARIERAPPORT (PDF)
+// 2. FÄRDIG PDF-RAPPORT FÖR FÖRSÄKRINGSBOLAG & UTSKRIFT
 // -------------------------------------------------------------
 export function generateVaultPdf(
   items: VaultExportItem[],
@@ -169,10 +118,10 @@ export function generateVaultPdf(
   doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(165, 180, 175);
-  doc.text("Officiellt Hemvalvsunderlag · Inventarieförteckning", 15, 28);
+  doc.text("Inventarieförteckning och lösöresunderlag", 15, 28);
   doc.text(`Datum: ${dateStr}`, 195, 28, { align: "right" });
 
-  // Bostadsuppgifter
+  // Bostads- och ägaruppgifter
   doc.setTextColor(30, 41, 59);
   doc.setFontSize(11);
   doc.setFont("helvetica", "bold");
@@ -247,7 +196,7 @@ export function generateVaultPdf(
       doc.setFontSize(8);
       doc.setTextColor(140);
       doc.text(
-        `Rapport skapad via BoValvet (https://bovalvet.se) — Sida ${data.pageNumber} av ${pageCount}`,
+        `Skapad via BoValvet (https://bovalvet.se) — Sida ${data.pageNumber} av ${pageCount}`,
         15,
         290
       );
@@ -258,7 +207,7 @@ export function generateVaultPdf(
 }
 
 // -------------------------------------------------------------
-// 4. JURIDISKT SKADEPAKET FÖR FÖRSÄKRINGSBOLAG (PDF)
+// 3. JURIDISKT SKADEPAKET VID SKADA ELLER INBROTT (PDF)
 // -------------------------------------------------------------
 export function generateIncidentPdf(options: {
   incidentType: string;
@@ -275,6 +224,7 @@ export function generateIncidentPdf(options: {
   const totalCost = items.reduce((sum, i) => sum + (Number(i.estimated_replacement_cost_sek) || 0), 0);
   const totalMarket = items.reduce((sum, i) => sum + (Number(i.market_value_sek) || 0), 0);
 
+  // Topp-banner för skada
   doc.setFillColor(185, 28, 28);
   doc.rect(0, 0, 210, 36, "F");
 
@@ -373,6 +323,7 @@ export function generateIncidentPdf(options: {
 
   const finalY = (doc as any).lastAutoTable.finalY || 200;
 
+  // Underskrift
   const signY = Math.min(finalY + 14, 245);
   doc.setTextColor(71, 85, 105);
   doc.setFontSize(8.5);
