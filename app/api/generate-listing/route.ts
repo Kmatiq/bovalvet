@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { GEMINI_MODEL } from "@/lib/geminiModel";
 
 export async function POST(req: NextRequest) {
   try {
@@ -86,7 +87,7 @@ KRITISKA FORMATREGLER FÖR ANNONSTEXTEN:
 `;
 
     const model = genAI.getGenerativeModel({
-      model: "gemini-3.8-flash",
+      model: GEMINI_MODEL,
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: responseSchema as any,

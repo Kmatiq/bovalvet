@@ -1,5 +1,9 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { DEFAULT_ITEM_CATEGORY } from "@/lib/itemCategories";
+
+// jsPDF-autotable lägger till lastAutoTable på dokumentet vid körning.
+type JsPdfWithAutoTable = jsPDF & { lastAutoTable?: { finalY?: number } };
 
 export interface VaultExportItem {
   id: string;
@@ -68,7 +72,7 @@ export function exportToCsv(items: VaultExportItem[], filename = "bovalvet-inven
     "Noteringar"
   ];
 
-  const escapeCell = (val: any) => {
+  const escapeCell = (val: unknown) => {
     if (val === undefined || val === null) return "";
     const str = String(val).replace(/"/g, '""');
     return `"${str}"`;
@@ -77,7 +81,7 @@ export function exportToCsv(items: VaultExportItem[], filename = "bovalvet-inven
   const rows = sortedItems.map((i) => [
     escapeCell(i.room || "Ospecificerat"),
     escapeCell(i.title),
-    escapeCell(i.category || "Övrigt"),
+    escapeCell(i.category || DEFAULT_ITEM_CATEGORY),
     escapeCell(i.brand || ""),
     escapeCell(i.model || ""),
     escapeCell(i.condition || "Gott"),
@@ -205,7 +209,7 @@ export function generateVaultPdf(
       6: { cellWidth: 20, halign: "right" }
     },
     didDrawPage: (data) => {
-      const pageCount = (doc as any).internal.getNumberOfPages();
+      const pageCount = doc.getNumberOfPages();
       doc.setFontSize(8);
       doc.setTextColor(140);
       doc.text(
@@ -334,7 +338,7 @@ export function generateIncidentPdf(options: {
     }
   });
 
-  const finalY = (doc as any).lastAutoTable.finalY || 200;
+  const finalY = (doc as JsPdfWithAutoTable).lastAutoTable?.finalY || 200;
 
   const signY = Math.min(finalY + 14, 245);
   doc.setTextColor(71, 85, 105);
@@ -349,7 +353,7 @@ export function generateIncidentPdf(options: {
   doc.text("Ort och datum", 15, signY + 23);
   doc.text("Försäkringstagarens underskrift", 110, signY + 23);
 
-  const pageCount = (doc as any).internal.getNumberOfPages();
+  const pageCount = doc.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
     doc.setFontSize(8);

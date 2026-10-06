@@ -45,7 +45,7 @@ Gränssnittet i BoValvet riktar sig till slutanvändare utan teknikintresse. Fö
 * **Frontend:** [Next.js](https://nextjs.org/) (App Router, React 19, TypeScript)
 * **Styling:** [Tailwind CSS v4](https://tailwindcss.com/) & [Lucide React](https://lucide.dev/)
 * **Backend & Databas:** [Supabase](https://supabase.com/) (PostgreSQL, Supabase Auth med OAuth/e-post, Supabase Storage med privat bucket `item-photos` och tidsbegränsade signed URLs)
-* **AI & Datorseende:** Google Gemini API (`@google/genai`, modellen `gemini-2.5-flash`)
+* **AI & Datorseende:** Google Gemini API (`@google/genai`, modellen `gemini-3.8-flash`)
 * **Dokumentgenerering:** [jsPDF](https://github.com/parallax/jsPDF) & [jspdf-autotable](https://github.com/simonbengtsson/jsPDF-AutoTable)
 * **Hosting:** Vercel (kopplat till repot `Kmatiq/bovalvet` på branch `main`)
 
@@ -55,7 +55,6 @@ Gränssnittet i BoValvet riktar sig till slutanvändare utan teknikintresse. Fö
 
 ```text
 ├── app/
-│   ├── actions/                  # Server Actions (bl.a. Gemini-bildanalys)
 │   ├── api/                      # Next.js API Routes
 │   │   ├── analyze/              # AI-analys av föremål och bounding boxes
 │   │   ├── analyze-receipt/      # Kvitto-OCR och garantiberäkning
@@ -66,6 +65,8 @@ Gränssnittet i BoValvet riktar sig till slutanvändare utan teknikintresse. Fö
 │   └── DESIGN.md                 # UI/UX- och typografiregler
 ├── lib/
 │   ├── exportVault.ts            # PDF- och Excel/Numbers-export (grupperat per rum)
+│   ├── geminiModel.ts            # Enda källan till Gemini-modellnamnet
+│   ├── itemCategories.ts         # Kanonisk kategorilista för föremål
 │   ├── sanitizeImage.ts          # Klientsidig EXIF-rensning och bildoptimering
 │   └── supabaseClient.ts         # Supabase-klientinitialisering
 ├── public/                       # Statiska ikoner, PWA-resurser och bilder

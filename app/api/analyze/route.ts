@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { GEMINI_MODEL } from "@/lib/geminiModel";
+import { ITEM_CATEGORIES } from "@/lib/itemCategories";
 
 const apiKey = process.env.GEMINI_API_KEY || "";
 const genAI = new GoogleGenerativeAI(apiKey);
@@ -21,6 +23,12 @@ Om bilden ENBART föreställer en utomhusvy, en byggnad, en spårvagn, en gata e
 Svara med en tom lista för items: []. Identifiera INTE byggnaden eller fordonet som ett föremål!
 `;
 
+interface RawAnalyzedItem {
+  title?: string;
+  category?: string;
+  estimated_replacement_cost_sek?: number;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { base64Image, mimeType = "image/jpeg" } = await req.json();
@@ -33,7 +41,7 @@ export async function POST(req: NextRequest) {
     }
 
     const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
+      model: GEMINI_MODEL,
       systemInstruction: SYSTEM_INSTRUCTION,
       generationConfig: {
         responseMimeType: "application/json",
@@ -47,7 +55,7 @@ export async function POST(req: NextRequest) {
                 type: SchemaType.OBJECT,
                 properties: {
                   title: { type: SchemaType.STRING },
-                  category: { type: SchemaType.STRING },
+                  category: { type: SchemaType.STRING, format: "enum", enum: [...ITEM_CATEGORIES] },
                   brand: { type: SchemaType.STRING },
                   model: { type: SchemaType.STRING },
                   estimated_replacement_cost_sek: { type: SchemaType.NUMBER },
@@ -87,9 +95,9 @@ export async function POST(req: NextRequest) {
     ]);
 
     const text = result.response.text()?.trim() || "{}";
-    const parsed = JSON.parse(text);
+    const parsed = JSON.parse(text) as { items?: RawAnalyzedItem[] };
 
-    const filteredItems = (parsed.items || []).filter((item: any) => {
+    const filteredItems = (parsed.items || []).filter((item: RawAnalyzedItem) => {
       const titleAndCat = `${item.title || ""} ${item.category || ""}`.toLowerCase();
       const isExcluded = /skyskrapa|byggnad|fastighet|spårvagn|tunnelbana|lokaltrafik|bro|väg/i.test(titleAndCat);
       const isExtremePrice = Number(item.estimated_replacement_cost_sek) > 10_000_000;
@@ -100,10 +108,11 @@ export async function POST(req: NextRequest) {
       success: true,
       items: filteredItems,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Fel vid analys av bild:", error);
+    const message = error instanceof Error ? error.message : "Ett fel uppstod vid analys av bilden.";
     return NextResponse.json(
-      { success: false, error: error.message || "Ett fel uppstod vid analys av bilden." },
+      { success: false, error: message },
       { status: 500 }
     );
   }

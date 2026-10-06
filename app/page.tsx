@@ -2,64 +2,50 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { 
-  Camera, 
-  Sparkles, 
-  ShieldCheck, 
-  CheckCircle2, 
-  AlertCircle, 
-  Lock, 
-  Mail, 
-  KeyRound, 
-  Loader2, 
-  LogOut, 
-  Trash2, 
-  Tag, 
-  X, 
-  Edit3, 
-  FileDown, 
-  Building2, 
-  ChevronDown, 
-  ChevronUp, 
-  AlertTriangle, 
-  Receipt, 
-  CalendarCheck, 
-  Info, 
-  ShoppingBag, 
-  Copy, 
-  Check, 
-  ShieldAlert, 
-  Flame, 
-  Droplets, 
-  Zap, 
-  CheckSquare, 
-  Square, 
-  Image as ImageIcon, 
-  PenTool, 
-  Phone, 
-  ChevronRight, 
-  Plus, 
-  Home as HomeIcon, 
-  LayoutGrid, 
-  MoreHorizontal, 
-  Clock, 
-  Shield, 
-  Users, 
-  Wrench, 
-  BookOpen, 
-  ExternalLink, 
-  Archive, 
-  RotateCcw, 
-  Scale, 
-  WifiOff, 
-  Layers, 
-  MousePointerClick, 
-  Download, 
-  Share2 
+import {
+  Camera,
+  ShieldCheck,
+  CheckCircle2,
+  Lock,
+  Loader2,
+  LogOut,
+  X,
+  FileDown,
+  Building2,
+  ChevronDown,
+  ChevronUp,
+  AlertTriangle,
+  Receipt,
+  ShoppingBag,
+  Check,
+  ShieldAlert,
+  Flame,
+  Droplets,
+  Zap,
+  CheckSquare,
+  Square,
+  Image as ImageIcon,
+  Phone,
+  ChevronRight,
+  Home as HomeIcon,
+  LayoutGrid,
+  MoreHorizontal,
+  Clock,
+  Shield,
+  Wrench,
+  BookOpen,
+  ExternalLink,
+  Archive,
+  RotateCcw,
+  Scale,
+  WifiOff,
+  MousePointerClick,
+  Download,
 } from "lucide-react";
 import { sanitizeAndCompressImage } from "@/lib/sanitizeImage";
 import { supabase } from "@/lib/supabaseClient";
 import { exportToCsv, generateVaultPdf, generateIncidentPdf } from "@/lib/exportVault";
+import { DEFAULT_ITEM_CATEGORY } from "@/lib/itemCategories";
 
 const STANDARD_ROOMS: Record<string, string> = {
   "Vardagsrum": "🛋️",
@@ -366,7 +352,7 @@ export default function HomePage() {
   const [showManualModal, setShowManualModal] = useState(false);
   const [manualFormData, setManualFormData] = useState<Partial<VaultItem>>({
     room: "Vardagsrum",
-    category: "Övrigt hem & inredning",
+    category: DEFAULT_ITEM_CATEGORY,
     condition: "Mycket gott",
   });
   const [manualPhotoFile, setManualPhotoFile] = useState<File | null>(null);
@@ -431,8 +417,6 @@ export default function HomePage() {
   }, [isAnalyzing]);
 
   useEffect(() => {
-    setIsOnline(navigator.onLine);
-
     const handleOnline = () => {
       setIsOnline(true);
       showToast("Åter ansluten till nätet ✓");
@@ -447,10 +431,14 @@ export default function HomePage() {
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
 
+    // Läses asynkront så att ingen synkron setState sker i effekten (react-hooks/set-state-in-effect).
+    queueMicrotask(() => setIsOnline(navigator.onLine));
+
     const savedQueue = localStorage.getItem("bovalvet_offline_queue");
     if (savedQueue) {
       try {
-        setOfflineQueue(JSON.parse(savedQueue));
+        const parsedQueue = JSON.parse(savedQueue);
+        queueMicrotask(() => setOfflineQueue(parsedQueue));
       } catch (e) {
         console.error(e);
       }
@@ -462,7 +450,7 @@ export default function HomePage() {
     };
   }, []);
 
-  const processOfflineQueue = async () => {
+  async function processOfflineQueue() {
     const queue = JSON.parse(localStorage.getItem("bovalvet_offline_queue") || "[]");
     if (queue.length === 0 || !sessionUser) return;
 
@@ -484,7 +472,7 @@ export default function HomePage() {
           condition: item.condition,
           is_archived: false
         });
-      } catch (err) {
+      } catch {
         remainingQueue.push(item);
       }
     }
@@ -496,9 +484,9 @@ export default function HomePage() {
       fetchVaultItems(sessionUser.id, selectedProperty?.id);
     }
     showToast("Synkning klar ✓");
-  };
+  }
 
-  const processPendingGuestData = async (userId: string) => {
+  async function processPendingGuestData(userId: string) {
     const pendingJson = localStorage.getItem("bovalvet_pending_guest_item");
     if (!pendingJson) return;
 
@@ -575,7 +563,7 @@ export default function HomePage() {
     } catch (e) {
       console.error("Kunde inte synka gästdata:", e);
     }
-  };
+  }
 
   useEffect(() => {
     const initSession = async () => {
@@ -646,7 +634,7 @@ export default function HomePage() {
     }
   };
 
-  const fetchProperties = async (userId: string) => {
+  async function fetchProperties(userId: string) {
     try {
       const { data, error } = await supabase
         .from("properties")
@@ -685,9 +673,9 @@ export default function HomePage() {
     } catch (e) {
       console.error("Kunde inte hämta bostäder:", e);
     }
-  };
+  }
 
-  const fetchPropertyMembers = async (propertyId: string) => {
+  async function fetchPropertyMembers(propertyId: string) {
     try {
       const { data, error } = await supabase
         .from("property_members")
@@ -700,7 +688,7 @@ export default function HomePage() {
     } catch (e) {
       console.error("Kunde inte hämta hushållsmedlemmar:", e);
     }
-  };
+  }
 
   const handleInviteMember = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -726,7 +714,7 @@ export default function HomePage() {
     }
   };
 
-  const fetchVaultStats = async (userId: string, propertyId?: string) => {
+  async function fetchVaultStats(userId: string, propertyId?: string) {
     try {
       let query = supabase.from("items").select("estimated_replacement_cost_sek").eq("user_id", userId).eq("is_archived", false);
       if (propertyId) query = query.eq("property_id", propertyId);
@@ -739,9 +727,9 @@ export default function HomePage() {
     } catch (e) {
       console.error("Kunde inte hämta statistik:", e);
     }
-  };
+  }
 
-  const fetchVaultItems = async (userId: string, propertyId?: string) => {
+  async function fetchVaultItems(userId: string, propertyId?: string) {
     try {
       let query = supabase.from("items").select("*").eq("user_id", userId).order("created_at", { ascending: false });
       if (propertyId) query = query.eq("property_id", propertyId);
@@ -788,7 +776,7 @@ export default function HomePage() {
     } catch (err: any) {
       console.error("Kunde inte hämta valv:", err);
     }
-  };
+  }
 
   const handleConfirmDelete = async () => {
     if (!itemToDelete) return;
@@ -1146,7 +1134,7 @@ export default function HomePage() {
         setIsAnalyzing(false);
         setResult({
           title: "Föremål (Sparat offline)",
-          category: "Övrigt hem & inredning",
+          category: DEFAULT_ITEM_CATEGORY,
           brand: "",
           model: "",
           estimated_replacement_cost_sek: 1000,
@@ -1204,11 +1192,11 @@ export default function HomePage() {
       } else {
         alert(response.error || "Kunde inte tolka föremålet.");
       }
-    } catch (err: unknown) {
+    } catch {
       setIsAnalyzing(false);
       setResult({
         title: "Föremål (Sparat offline)",
-        category: "Övrigt hem & inredning",
+        category: DEFAULT_ITEM_CATEGORY,
         brand: "",
         model: "",
         estimated_replacement_cost_sek: 1000,
@@ -1436,7 +1424,7 @@ export default function HomePage() {
         user_id: sessionUser.id,
         property_id: selectedProperty?.id || null,
         title: manualFormData.title,
-        category: manualFormData.category || "Övrigt hem & inredning",
+        category: manualFormData.category || DEFAULT_ITEM_CATEGORY,
         room: manualFormData.room || activeRoom,
         brand: manualFormData.brand || "",
         model: manualFormData.model || "",
@@ -1457,7 +1445,7 @@ export default function HomePage() {
       await fetchVaultItems(sessionUser.id, selectedProperty?.id);
       
       setShowManualModal(false);
-      setManualFormData({ room: activeRoom, category: "Övrigt hem & inredning", condition: "Mycket gott" });
+      setManualFormData({ room: activeRoom, category: DEFAULT_ITEM_CATEGORY, condition: "Mycket gott" });
       setManualPhotoFile(null);
       setManualPhotoPreview(null);
 
@@ -1640,11 +1628,11 @@ export default function HomePage() {
   const avatarLetter = (displayName || sessionUser?.email || "K").trim()[0].toUpperCase();
 
   return (
-    <div className="min-h-screen bg-[var(--color-bg)] md:bg-[#ECE4D8] text-[var(--color-text)] flex justify-center selection:bg-[var(--color-primary-soft)] selection:text-[var(--color-primary)]">
+    <div className="min-h-screen bg-[var(--color-bg)] md:bg-[var(--color-backdrop-desktop)] text-[var(--color-text)] flex justify-center selection:bg-[var(--color-primary-soft)] selection:text-[var(--color-primary)]">
       <div className="w-full max-w-[480px] min-h-screen flex flex-col relative pb-32 bg-[var(--color-bg)] md:shadow-md md:border-x md:border-[var(--color-border)]">
 
         {!isOnline && (
-          <div className="bg-amber-600 text-white text-xs font-bold px-4 py-2 text-center flex items-center justify-center gap-2 z-30">
+          <div className="bg-[var(--color-warn-strong)] text-[var(--color-on-primary)] text-sm font-bold px-4 py-2 text-center flex items-center justify-center gap-2 z-30">
             <WifiOff className="w-4 h-4" />
             <span>Offlineläge aktivt ({offlineQueue.length} i kö)</span>
           </div>
@@ -1653,7 +1641,7 @@ export default function HomePage() {
         {!showRoomPickerScreen && !isAnalyzing && !result && multiResults.length === 0 && !editingItem && !showArchiveHub && (
           <header className="h-16 px-5 flex items-center justify-between z-20">
             <div className="flex items-center gap-2.5">
-              <div className="w-10 h-10 rounded-xl bg-[var(--color-primary)] text-[var(--color-onp,#fff)] flex items-center justify-center font-extrabold text-base shadow-xs">
+              <div className="w-10 h-10 rounded-xl bg-[var(--color-primary)] text-[var(--color-on-primary)] flex items-center justify-center font-extrabold text-base shadow-xs">
                 BV
               </div>
               <button
@@ -1672,7 +1660,7 @@ export default function HomePage() {
               {!isPro && (
                 <button
                   onClick={() => setShowProModal(true)}
-                  className="px-3 py-1.5 rounded-full bg-[var(--color-primary)] text-white text-xs font-extrabold shadow-xs"
+                  className="px-3 py-1.5 rounded-full bg-[var(--color-primary)] text-[var(--color-on-primary)] text-sm font-extrabold shadow-xs"
                 >
                   PRO
                 </button>
@@ -1751,7 +1739,7 @@ export default function HomePage() {
                 <button
                   type="button"
                   onClick={() => cameraInputRef.current?.click()}
-                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98]"
+                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-primary)] text-[var(--color-on-primary)] font-bold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98]"
                 >
                   <Camera className="w-5 h-5" />
                   <span>Ta foto i {activeRoom}</span>
@@ -1770,9 +1758,9 @@ export default function HomePage() {
           {isAnalyzing && (
             <div className="py-16 text-center space-y-7 animate-in fade-in select-none">
               <div className="relative w-52 h-52 mx-auto">
-                <div className="absolute -inset-2 bg-gradient-to-tr from-[var(--color-primary)] via-emerald-400 to-amber-300 rounded-[34px] opacity-35 blur-md animate-pulse" />
+                <div className="absolute -inset-2 bg-gradient-to-tr from-[var(--color-primary)] via-[var(--color-success-light)] to-[var(--color-warn-light)] rounded-[34px] opacity-35 blur-md animate-pulse" />
 
-                <div className="relative w-full h-full rounded-3xl overflow-hidden bg-stone-900 border-2 border-[var(--color-primary)] shadow-2xl flex items-center justify-center">
+                <div className="relative w-full h-full rounded-3xl overflow-hidden bg-[var(--color-dark)] border-2 border-[var(--color-primary)] shadow-2xl flex items-center justify-center">
                   {previewUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img 
@@ -1783,7 +1771,7 @@ export default function HomePage() {
                   ) : (
                     <Camera className="w-16 h-16 text-[var(--color-primary)] opacity-40 animate-pulse" />
                   )}
-                  <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-[var(--color-primary)] to-transparent shadow-[0_0_12px_#2dd4bf] animate-[bounce_2.5s_infinite]" />
+                  <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-[var(--color-primary)] to-transparent shadow-[0_0_12px_var(--color-scan-glow)] animate-[bounce_2.5s_infinite]" />
                 </div>
 
                 <div className="absolute -bottom-2.5 -right-2.5 w-12 h-12 rounded-2xl bg-[var(--color-surface)] border-2 border-[var(--color-primary)] shadow-lg flex items-center justify-center text-2xl transition-all duration-300">
@@ -1817,7 +1805,7 @@ export default function HomePage() {
                 >
                   ← Fota om
                 </button>
-                <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)] flex items-center gap-1.5">
+                <span className="text-sm font-bold px-3 py-1.5 rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)] flex items-center gap-1.5">
                   <MousePointerClick className="w-3.5 h-3.5" />
                   <span>Klicka på bilden för att välja</span>
                 </span>
@@ -1833,7 +1821,7 @@ export default function HomePage() {
               </div>
 
               {previewUrl && (
-                <div className="relative rounded-3xl overflow-hidden bg-black border border-[var(--color-border)] shadow-md select-none">
+                <div className="relative rounded-3xl overflow-hidden bg-[var(--color-dark)] border border-[var(--color-border)] shadow-md select-none">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={previewUrl} alt="Översiktsbild" className="w-full h-auto max-h-[380px] object-contain block mx-auto" />
                   
@@ -1854,12 +1842,12 @@ export default function HomePage() {
                         style={{ top, left, width, height }}
                         className={`absolute cursor-pointer border-2 transition-all duration-200 rounded-2xl flex items-start justify-start p-1.5 ${
                           isSelected 
-                            ? "border-[var(--color-primary)] bg-[var(--color-primary)]/20 shadow-lg ring-2 ring-white/60" 
-                            : "border-white/60 bg-black/35 opacity-60 hover:opacity-90"
+                            ? "border-[var(--color-primary)] bg-[var(--color-primary)]/20 shadow-lg ring-2 ring-[var(--color-halo)]" 
+                            : "border-[var(--color-halo)] bg-[var(--color-scrim-soft)] opacity-60 hover:opacity-90"
                         }`}
                       >
-                        <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-black shadow-md transition ${
-                          isSelected ? "bg-[var(--color-primary)] text-white" : "bg-black/80 text-white"
+                        <span className={`w-6 h-6 rounded-full flex items-center justify-center text-sm font-black shadow-md transition ${
+                          isSelected ? "bg-[var(--color-primary)] text-[var(--color-on-primary)]" : "bg-[var(--color-scrim-dense)] text-[var(--color-on-primary)]"
                         }`}>
                           {idx + 1}
                         </span>
@@ -1883,14 +1871,14 @@ export default function HomePage() {
                       }`}
                     >
                       <div className="flex items-center gap-3 min-w-0">
-                        <span className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs font-black flex-shrink-0 ${
-                          isChecked ? "bg-[var(--color-primary)] text-white" : "bg-[var(--color-border)] text-[var(--color-text-soft)]"
+                        <span className={`w-7 h-7 rounded-xl flex items-center justify-center text-sm font-black flex-shrink-0 ${
+                          isChecked ? "bg-[var(--color-primary)] text-[var(--color-on-primary)]" : "bg-[var(--color-border)] text-[var(--color-text-soft)]"
                         }`}>
                           {idx + 1}
                         </span>
                         <div className="min-w-0">
                           <b className="text-base text-[var(--color-text)] block truncate">{item.title}</b>
-                          <span className="text-xs text-[var(--color-text-soft)] block truncate">
+                          <span className="text-sm text-[var(--color-text-soft)] block truncate">
                             {item.brand ? `${item.brand} · ` : ""}{item.condition}
                           </span>
                         </div>
@@ -1900,7 +1888,7 @@ export default function HomePage() {
                         <span className="text-base font-black text-[var(--color-text)] block">
                           {Number(item.estimated_replacement_cost_sek).toLocaleString("sv-SE")} kr
                         </span>
-                        <span className="text-[11px] font-bold text-[var(--color-primary)]">
+                        <span className="text-sm font-bold text-[var(--color-primary)]">
                           Beg: {Number(item.market_value_sek).toLocaleString("sv-SE")} kr
                         </span>
                       </div>
@@ -1914,7 +1902,7 @@ export default function HomePage() {
                   type="button"
                   onClick={() => executeSaveMultiItems(sessionUser?.id)}
                   disabled={isSaving || selectedMultiIndices.length === 0}
-                  className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98] disabled:opacity-50"
+                  className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary)] text-[var(--color-on-primary)] font-bold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98] disabled:opacity-50"
                 >
                   {isSaving ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
@@ -1967,12 +1955,12 @@ export default function HomePage() {
                       width: `${Math.max(15, ((result.box_2d[3] - result.box_2d[1]) / 1000) * 100)}%`,
                       height: `${Math.max(12, ((result.box_2d[2] - result.box_2d[0]) / 1000) * 100)}%`,
                     }}
-                    className="absolute border-2 border-[var(--color-primary)] bg-[var(--color-primary)]/15 rounded-2xl pointer-events-none ring-2 ring-white/50"
+                    className="absolute border-2 border-[var(--color-primary)] bg-[var(--color-primary)]/15 rounded-2xl pointer-events-none ring-2 ring-[var(--color-halo-soft)]"
                   />
                 )}
 
-                <div className="absolute bottom-3 left-3 bg-white/95 backdrop-blur-md px-3.5 py-1.5 rounded-full shadow-xs border border-stone-200 flex items-center gap-1.5 text-slate-800">
-                  <Check className="w-4 h-4 text-emerald-600" />
+                <div className="absolute bottom-3 left-3 bg-[var(--color-surface-glass)] backdrop-blur-md px-3.5 py-1.5 rounded-full shadow-xs border border-[var(--color-border)] flex items-center gap-1.5 text-[var(--color-text)]">
+                  <Check className="w-4 h-4 text-[var(--color-success)]" />
                   <span className="text-[15px] font-semibold">{Math.round(result.confidence * 100)} % säker</span>
                 </div>
               </div>
@@ -2018,7 +2006,7 @@ export default function HomePage() {
                   type="button"
                   onClick={() => executeSaveAiItem(sessionUser?.id)}
                   disabled={isSaving}
-                  className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98]"
+                  className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary)] text-[var(--color-on-primary)] font-bold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98]"
                 >
                   {isSaving ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
@@ -2112,7 +2100,7 @@ export default function HomePage() {
                       setActiveRoom(firstEmptyRoom);
                       setShowRoomPickerScreen(true);
                     }}
-                    className="min-h-[44px] px-4 rounded-xl bg-[var(--color-primary-soft)] text-[var(--color-primary)] font-bold text-sm flex items-center gap-1.5 flex-shrink-0 hover:bg-[var(--color-primary)] hover:text-white transition"
+                    className="min-h-[44px] px-4 rounded-xl bg-[var(--color-primary-soft)] text-[var(--color-primary)] font-bold text-sm flex items-center gap-1.5 flex-shrink-0 hover:bg-[var(--color-primary)] hover:text-[var(--color-on-primary)] transition"
                   >
                     <Camera className="w-4 h-4" />
                     <span>Fota här</span>
@@ -2171,7 +2159,7 @@ export default function HomePage() {
                     <button
                       type="button"
                       onClick={() => setShowRoomPickerScreen(true)}
-                      className="min-h-[52px] px-6 rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base inline-flex items-center gap-2"
+                      className="min-h-[52px] px-6 rounded-2xl bg-[var(--color-primary)] text-[var(--color-on-primary)] font-bold text-base inline-flex items-center gap-2"
                     >
                       <Camera className="w-5 h-5" />
                       <span>Fota ditt första föremål</span>
@@ -2222,7 +2210,7 @@ export default function HomePage() {
                   onClick={() => setSelectedRoomFilter("Alla")}
                   className={`min-h-[44px] px-4 rounded-full font-bold text-base whitespace-nowrap border transition ${
                     selectedRoomFilter === "Alla"
-                      ? "bg-[var(--color-primary)] text-white border-[var(--color-primary)]"
+                      ? "bg-[var(--color-primary)] text-[var(--color-on-primary)] border-[var(--color-primary)]"
                       : "bg-[var(--color-surface)] text-[var(--color-text)] border-[var(--color-border)]"
                   }`}
                 >
@@ -2237,7 +2225,7 @@ export default function HomePage() {
                       onClick={() => setSelectedRoomFilter(r)}
                       className={`min-h-[44px] px-4 rounded-full font-semibold text-base whitespace-nowrap border transition ${
                         selectedRoomFilter === r
-                          ? "bg-[var(--color-primary)] text-white border-[var(--color-primary)]"
+                          ? "bg-[var(--color-primary)] text-[var(--color-on-primary)] border-[var(--color-primary)]"
                           : "bg-[var(--color-surface)] text-[var(--color-text)] border-[var(--color-border)]"
                       }`}
                     >
@@ -2261,7 +2249,7 @@ export default function HomePage() {
                         setActiveRoom(selectedRoomFilter === "Alla" ? "Vardagsrum" : selectedRoomFilter);
                         setShowRoomPickerScreen(true);
                       }}
-                      className="min-h-[52px] px-6 rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base"
+                      className="min-h-[52px] px-6 rounded-2xl bg-[var(--color-primary)] text-[var(--color-on-primary)] font-bold text-base"
                     >
                       Fota i {selectedRoomFilter === "Alla" ? "Vardagsrum" : selectedRoomFilter}
                     </button>
@@ -2295,7 +2283,7 @@ export default function HomePage() {
                               {Number(item.estimated_replacement_cost_sek).toLocaleString("sv-SE")} kr
                             </span>
                             {wStatus && (
-                              <span className={`text-[13px] font-bold px-2.5 py-0.5 rounded-md ${wStatus.badgeClass}`}>
+                              <span className={`text-sm font-bold px-2.5 py-0.5 rounded-md ${wStatus.badgeClass}`}>
                                 Garanti ✓
                               </span>
                             )}
@@ -2328,7 +2316,7 @@ export default function HomePage() {
                 <button
                   type="button"
                   onClick={openIncidentModal}
-                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2 shadow-sm"
+                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-primary)] text-[var(--color-on-primary)] font-bold text-base flex items-center justify-center gap-2 shadow-sm"
                 >
                   <ShieldAlert className="w-5 h-5" />
                   <span>Något har hänt? Skapa skadeanmälan</span>
@@ -2356,8 +2344,8 @@ export default function HomePage() {
                   <button
                     type="button"
                     onClick={() => setWarrantyFilter("all")}
-                    className={`min-h-[38px] px-3.5 rounded-full text-sm font-bold border transition ${
-                      warrantyFilter === "all" ? "bg-[var(--color-primary)] text-white border-[var(--color-primary)]" : "bg-[var(--color-surface)] text-[var(--color-text)] border-[var(--color-border)]"
+                    className={`min-h-[44px] px-3.5 rounded-full text-sm font-bold border transition ${
+                      warrantyFilter === "all" ? "bg-[var(--color-primary)] text-[var(--color-on-primary)] border-[var(--color-primary)]" : "bg-[var(--color-surface)] text-[var(--color-text)] border-[var(--color-border)]"
                     }`}
                   >
                     Alla ({itemsWithWarranty.length})
@@ -2365,7 +2353,7 @@ export default function HomePage() {
                   <button
                     type="button"
                     onClick={() => setWarrantyFilter("expiring_soon")}
-                    className={`min-h-[38px] px-3.5 rounded-full text-sm font-bold border transition ${
+                    className={`min-h-[44px] px-3.5 rounded-full text-sm font-bold border transition ${
                       warrantyFilter === "expiring_soon" ? "bg-[var(--color-warn-bg)] text-[var(--color-warn-text)] border-[var(--color-border)] font-black" : "bg-[var(--color-surface)] text-[var(--color-text)] border-[var(--color-border)]"
                     }`}
                   >
@@ -2374,8 +2362,8 @@ export default function HomePage() {
                   <button
                     type="button"
                     onClick={() => setWarrantyFilter("active")}
-                    className={`min-h-[38px] px-3.5 rounded-full text-sm font-bold border transition ${
-                      warrantyFilter === "active" ? "bg-[var(--color-primary)] text-white border-[var(--color-primary)]" : "bg-[var(--color-surface)] text-[var(--color-text)] border-[var(--color-border)]"
+                    className={`min-h-[44px] px-3.5 rounded-full text-sm font-bold border transition ${
+                      warrantyFilter === "active" ? "bg-[var(--color-primary)] text-[var(--color-on-primary)] border-[var(--color-primary)]" : "bg-[var(--color-surface)] text-[var(--color-text)] border-[var(--color-border)]"
                     }`}
                   >
                     Aktiva ({activeWarrantyItems.length})
@@ -2400,7 +2388,7 @@ export default function HomePage() {
                             setActiveImageIndex(0);
                           }}
                           className={`p-4 rounded-2xl border bg-[var(--color-surface)] shadow-card cursor-pointer active:scale-[.98] transition space-y-2 ${
-                            s.status === "expiring_soon" ? "border-amber-400 bg-amber-50/20" : "border-[var(--color-border)]"
+                            s.status === "expiring_soon" ? "border-[var(--color-warn-border)] bg-[var(--color-warn-soft)]" : "border-[var(--color-border)]"
                           }`}
                         >
                           <div className="flex justify-between items-start gap-2">
@@ -2410,13 +2398,13 @@ export default function HomePage() {
                                 Inköpt: {item.purchase_date} {item.purchase_store ? `hos ${item.purchase_store}` : ""}
                               </span>
                             </div>
-                            <span className={`text-[13px] px-3 py-1 rounded-xl font-bold ${s.badgeClass}`}>
+                            <span className={`text-sm px-3 py-1 rounded-xl font-bold ${s.badgeClass}`}>
                               {s.label}
                             </span>
                           </div>
 
                           {s.status === "expiring_soon" && (
-                            <div className="pt-1.5 border-t border-[var(--color-border)] text-[13px] text-[var(--color-warn-text)] font-semibold flex items-center gap-1.5">
+                            <div className="pt-1.5 border-t border-[var(--color-border)] text-sm text-[var(--color-warn-text)] font-semibold flex items-center gap-1.5">
                               <AlertTriangle className="w-4 h-4 flex-shrink-0" />
                               <span>Kontrollera funktionen innan garantin går ut den {s.expiryDate}!</span>
                             </div>
@@ -2602,7 +2590,7 @@ export default function HomePage() {
                           <button
                             type="button"
                             onClick={() => setViewingReceiptUrl(item.receiptUrl || null)}
-                            className="text-xs px-2.5 py-1.5 rounded-lg bg-[var(--color-primary-soft)] text-[var(--color-primary)] font-bold flex-shrink-0"
+                            className="text-sm px-2.5 py-1.5 rounded-lg bg-[var(--color-primary-soft)] text-[var(--color-primary)] font-bold flex-shrink-0"
                           >
                             Visa kvitto
                           </button>
@@ -2622,7 +2610,7 @@ export default function HomePage() {
                         <button
                           type="button"
                           onClick={() => setItemToDelete(item)}
-                          className="text-rose-600 font-bold hover:underline"
+                          className="text-[var(--color-danger-strong)] font-bold hover:underline"
                         >
                           Radera permanent
                         </button>
@@ -2648,7 +2636,7 @@ export default function HomePage() {
                     setEditingItem(null);
                     cameraInputRef.current?.click();
                   }}
-                  className="px-3.5 py-1.5 rounded-xl bg-[var(--color-primary)] text-white text-xs font-bold flex items-center gap-1 shadow-2xs"
+                  className="px-3.5 py-1.5 rounded-xl bg-[var(--color-primary)] text-[var(--color-on-primary)] text-sm font-bold flex items-center gap-1 shadow-2xs"
                 >
                   <Camera className="w-3.5 h-3.5" />
                   <span>Fota ett till i {editingItem.room}</span>
@@ -2664,7 +2652,7 @@ export default function HomePage() {
                       alt={editingItem.title} 
                       className="w-full h-full object-cover" 
                     />
-                    <div className="absolute top-3 right-3 bg-black/60 text-white text-xs font-bold px-2.5 py-1 rounded-full">
+                    <div className="absolute top-3 right-3 bg-[var(--color-scrim-strong)] text-[var(--color-on-primary)] text-sm font-bold px-2.5 py-1 rounded-full">
                       {activeImageIndex + 1} / {editingItem.imageUrls.length}
                     </div>
                   </div>
@@ -2696,7 +2684,7 @@ export default function HomePage() {
                           e.stopPropagation();
                           handleRemoveSpecificPhoto(idx);
                         }}
-                        className="absolute top-0.5 right-0.5 p-0.5 bg-black/70 text-white rounded-full hover:bg-rose-600 transition"
+                        className="absolute top-0.5 right-0.5 p-0.5 bg-[var(--color-scrim-heavy)] text-[var(--color-on-primary)] rounded-full hover:bg-[var(--color-danger-strong)] transition"
                       >
                         <X className="w-3 h-3" />
                       </button>
@@ -2707,7 +2695,7 @@ export default function HomePage() {
                     <button
                       type="button"
                       onClick={() => setShowEditPhotoOptions(true)}
-                      className="w-16 h-16 rounded-xl border-2 border-dashed border-[var(--color-border)] text-[var(--color-text-soft)] flex flex-col items-center justify-center font-bold text-xs hover:border-[var(--color-primary)] transition"
+                      className="w-16 h-16 rounded-xl border-2 border-dashed border-[var(--color-border)] text-[var(--color-text-soft)] flex flex-col items-center justify-center font-bold text-sm hover:border-[var(--color-primary)] transition"
                     >
                       {isUploadingItemPhoto ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>+ Foto</span>}
                     </button>
@@ -2717,7 +2705,7 @@ export default function HomePage() {
 
               <form onSubmit={handleSaveItemUpdates} className="space-y-4 text-sm">
                 <div>
-                  <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Benämning</label>
+                  <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-sm">Benämning</label>
                   <input
                     type="text"
                     required
@@ -2728,7 +2716,7 @@ export default function HomePage() {
                 </div>
 
                 <div>
-                  <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Rum</label>
+                  <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-sm">Rum</label>
                   <select
                     value={editingItem.room || "Vardagsrum"}
                     onChange={(e) => setEditingItem({ ...editingItem, room: e.target.value })}
@@ -2742,7 +2730,7 @@ export default function HomePage() {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Märke</label>
+                    <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-sm">Märke</label>
                     <input
                       type="text"
                       value={editingItem.brand || ""}
@@ -2751,7 +2739,7 @@ export default function HomePage() {
                     />
                   </div>
                   <div>
-                    <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Modell</label>
+                    <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-sm">Modell</label>
                     <input
                       type="text"
                       value={editingItem.model || ""}
@@ -2763,7 +2751,7 @@ export default function HomePage() {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Nypris idag (SEK)</label>
+                    <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-sm">Nypris idag (SEK)</label>
                     <input
                       type="number"
                       value={editingItem.estimated_replacement_cost_sek}
@@ -2772,7 +2760,7 @@ export default function HomePage() {
                     />
                   </div>
                   <div>
-                    <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Begagnatvärde (SEK)</label>
+                    <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-sm">Begagnatvärde (SEK)</label>
                     <input
                       type="number"
                       value={editingItem.market_value_sek}
@@ -2792,7 +2780,7 @@ export default function HomePage() {
                       type="button"
                       onClick={() => receiptInputRef.current?.click()}
                       disabled={isAnalyzingReceipt}
-                      className="min-h-[38px] px-3.5 rounded-xl bg-[var(--color-primary)] text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs hover:opacity-90"
+                      className="min-h-[44px] px-3.5 rounded-xl bg-[var(--color-primary)] text-[var(--color-on-primary)] text-sm font-bold flex items-center gap-1.5 shadow-2xs hover:opacity-90"
                     >
                       {isAnalyzingReceipt ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
                       <span>{editingItem.receipt_path ? "Byt kvitto" : "Fota kvitto"}</span>
@@ -2802,7 +2790,7 @@ export default function HomePage() {
                   {editingItem.receiptUrl && (
                     <div className="flex items-center justify-between p-3 rounded-2xl bg-[var(--color-primary-soft)] text-sm">
                       <div className="flex items-center gap-2 truncate">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                        <CheckCircle2 className="w-4 h-4 text-[var(--color-success)] flex-shrink-0" />
                         <span className="font-semibold truncate">Kvitto sparat i valvet</span>
                       </div>
                       <button
@@ -2815,9 +2803,9 @@ export default function HomePage() {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="grid grid-cols-2 gap-2 text-sm">
                     <div>
-                      <label className="text-[13px] font-semibold text-[var(--color-text-soft)] block mb-1">Inköpsdatum</label>
+                      <label className="text-sm font-semibold text-[var(--color-text-soft)] block mb-1">Inköpsdatum</label>
                       <input
                         type="date"
                         value={editingItem.purchase_date || ""}
@@ -2826,7 +2814,7 @@ export default function HomePage() {
                       />
                     </div>
                     <div>
-                      <label className="text-[13px] font-semibold text-[var(--color-text-soft)] block mb-1">Inköpsbutik</label>
+                      <label className="text-sm font-semibold text-[var(--color-text-soft)] block mb-1">Inköpsbutik</label>
                       <input
                         type="text"
                         placeholder="t.ex. Elgiganten"
@@ -2837,9 +2825,9 @@ export default function HomePage() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="grid grid-cols-2 gap-2 text-sm">
                     <div>
-                      <label className="text-[13px] font-semibold text-[var(--color-text-soft)] block mb-1">Köppris (SEK)</label>
+                      <label className="text-sm font-semibold text-[var(--color-text-soft)] block mb-1">Köppris (SEK)</label>
                       <input
                         type="number"
                         placeholder="Enligt kvitto"
@@ -2849,7 +2837,7 @@ export default function HomePage() {
                       />
                     </div>
                     <div>
-                      <label className="text-[13px] font-semibold text-[var(--color-text-soft)] block mb-1">Garanti / Reklamation</label>
+                      <label className="text-sm font-semibold text-[var(--color-text-soft)] block mb-1">Garanti / Reklamation</label>
                       <select
                         value={editingItem.warranty_months || 36}
                         onChange={(e) => setEditingItem({ ...editingItem, warranty_months: Number(e.target.value) })}
@@ -2866,7 +2854,7 @@ export default function HomePage() {
                 </div>
 
                 <div>
-                  <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Serienummer / PNC</label>
+                  <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-sm">Serienummer / PNC</label>
                   <input
                     type="text"
                     placeholder="t.ex. 916 098 765"
@@ -2913,7 +2901,7 @@ export default function HomePage() {
                 </button>
 
                 <div>
-                  <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Egna anteckningar</label>
+                  <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-sm">Egna anteckningar</label>
                   <textarea
                     rows={2}
                     placeholder="t.ex. Kvitto sparat, garanti, tillbehör..."
@@ -2927,7 +2915,7 @@ export default function HomePage() {
                   <button
                     type="submit"
                     disabled={isUpdating}
-                    className="min-h-[52px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98]"
+                    className="min-h-[52px] w-full rounded-2xl bg-[var(--color-primary)] text-[var(--color-on-primary)] font-bold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98]"
                   >
                     {isUpdating ? <Loader2 className="w-5 h-5 animate-spin" /> : <span>Spara ändringar</span>}
                   </button>
@@ -2944,7 +2932,7 @@ export default function HomePage() {
                   <button
                     type="button"
                     onClick={() => setItemToDelete(editingItem)}
-                    className="min-h-[44px] w-full text-[var(--color-text-soft)] text-base font-semibold hover:text-rose-600 transition"
+                    className="min-h-[44px] w-full text-[var(--color-text-soft)] text-base font-semibold hover:text-[var(--color-danger-strong)] transition"
                   >
                     Radera permanent
                   </button>
@@ -2965,7 +2953,7 @@ export default function HomePage() {
                 }`}
               >
                 <HomeIcon className="w-6 h-6" />
-                <span className="text-[13px]">Hem</span>
+                <span className="text-sm">Hem</span>
               </button>
 
               <button
@@ -2976,14 +2964,14 @@ export default function HomePage() {
                 }`}
               >
                 <LayoutGrid className="w-6 h-6" />
-                <span className="text-[13px]">Rum</span>
+                <span className="text-sm">Rum</span>
               </button>
 
               <div className="w-[76px] relative flex justify-center">
                 <button
                   type="button"
                   onClick={() => setShowAddActionSheet(true)}
-                  className="absolute -top-7 w-[62px] h-[62px] rounded-full bg-[var(--color-accent)] text-white flex items-center justify-center border-4 border-[var(--color-bg)] shadow-[0_8px_20px_rgba(224,83,58,0.4)] active:scale-95 transition"
+                  className="absolute -top-7 w-[62px] h-[62px] rounded-full bg-[var(--color-accent)] text-[var(--color-on-primary)] flex items-center justify-center border-4 border-[var(--color-bg)] shadow-[0_8px_20px_rgba(224,83,58,0.4)] active:scale-95 transition"
                   aria-label="Lägg till föremål"
                 >
                   <Camera className="w-7 h-7 stroke-[2.2]" />
@@ -2998,7 +2986,7 @@ export default function HomePage() {
                 }`}
               >
                 <ShieldCheck className="w-6 h-6" />
-                <span className="text-[11px] font-medium leading-tight text-center">Försäkring & garanti</span>
+                <span className="text-sm font-medium leading-tight text-center">Försäkring & garanti</span>
               </button>
 
               <button
@@ -3009,7 +2997,7 @@ export default function HomePage() {
                 }`}
               >
                 <MoreHorizontal className="w-6 h-6" />
-                <span className="text-[13px]">Mer</span>
+                <span className="text-sm">Mer</span>
               </button>
             </div>
           </nav>
@@ -3018,7 +3006,7 @@ export default function HomePage() {
         {/* SPARA OCH DELA (RENSAD FRÅN JSON OCH TEKNISK JARGONG) */}
         {showExportModal && (
           <div 
-            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in"
+            className="fixed inset-0 z-50 bg-[var(--color-scrim-strong)] backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in"
             onClick={() => setShowExportModal(false)}
           >
             <div 
@@ -3034,7 +3022,7 @@ export default function HomePage() {
                     <h2 className="text-[19px] font-extrabold text-[var(--color-text)]">
                       Spara eller dela förteckning
                     </h2>
-                    <span className="text-xs text-[var(--color-text-soft)] block">
+                    <span className="text-sm text-[var(--color-text-soft)] block">
                       Välj hur du vill ta ut dina inventarier
                     </span>
                   </div>
@@ -3046,16 +3034,16 @@ export default function HomePage() {
 
               {/* Rumsurval */}
               <div>
-                <label className="text-xs font-bold text-[var(--color-text-soft)] block mb-1.5">
+                <label className="text-sm font-bold text-[var(--color-text-soft)] block mb-1.5">
                   VILKA FÖREMÅL VILL DU HA MED?
                 </label>
                 <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
                   <button
                     type="button"
                     onClick={() => setExportRoomFilter("Alla")}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-bold border transition ${
+                    className={`px-3.5 py-1.5 rounded-full text-sm font-bold border transition ${
                       exportRoomFilter === "Alla"
-                        ? "bg-[var(--color-primary)] text-white border-[var(--color-primary)]"
+                        ? "bg-[var(--color-primary)] text-[var(--color-on-primary)] border-[var(--color-primary)]"
                         : "bg-[var(--color-bg)] border-[var(--color-border)] text-[var(--color-text)]"
                     }`}
                   >
@@ -3069,9 +3057,9 @@ export default function HomePage() {
                         key={r}
                         type="button"
                         onClick={() => setExportRoomFilter(r)}
-                        className={`px-3.5 py-1.5 rounded-full text-xs font-bold border transition ${
+                        className={`px-3.5 py-1.5 rounded-full text-sm font-bold border transition ${
                           exportRoomFilter === r
-                            ? "bg-[var(--color-primary)] text-white border-[var(--color-primary)]"
+                            ? "bg-[var(--color-primary)] text-[var(--color-on-primary)] border-[var(--color-primary)]"
                             : "bg-[var(--color-bg)] border-[var(--color-border)] text-[var(--color-text)]"
                         }`}
                       >
@@ -3110,7 +3098,7 @@ export default function HomePage() {
                       <b className="text-[16px] text-[var(--color-text)] block group-hover:text-[var(--color-primary)] transition">
                         Färdig PDF-rapport
                       </b>
-                      <span className="text-xs text-[var(--color-text-soft)] leading-snug block">
+                      <span className="text-sm text-[var(--color-text-soft)] leading-snug block">
                         Prydligt dokument med datumstämpel och värden. Perfekt att mejla till försäkringsbolaget eller skriva ut.
                       </span>
                     </div>
@@ -3141,7 +3129,7 @@ export default function HomePage() {
                       <b className="text-[16px] text-[var(--color-text)] block group-hover:text-[var(--color-primary)] transition">
                         Kalkylark (Excel / Numbers)
                       </b>
-                      <span className="text-xs text-[var(--color-text-soft)] leading-snug block">
+                      <span className="text-sm text-[var(--color-text-soft)] leading-snug block">
                         En överskådlig tabell för dig som vill spara en lista på datorn eller arbeta vidare i Excel.
                       </span>
                     </div>
@@ -3150,7 +3138,7 @@ export default function HomePage() {
                 </button>
               </div>
 
-              <p className="text-[11px] text-[var(--color-text-soft)] text-center leading-relaxed">
+              <p className="text-sm text-[var(--color-text-soft)] text-center leading-relaxed">
                 Allt skapas tryggt och direkt i din webbläsare.
               </p>
             </div>
@@ -3159,7 +3147,7 @@ export default function HomePage() {
 
         {showProModal && (
           <div 
-            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in"
+            className="fixed inset-0 z-50 bg-[var(--color-scrim-strong)] backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in"
             onClick={() => setShowProModal(false)}
           >
             <div 
@@ -3186,19 +3174,19 @@ export default function HomePage() {
 
               <div className="space-y-2.5 text-sm font-medium text-[var(--color-text)] text-left">
                 <div className="flex items-center gap-2.5">
-                  <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                  <Check className="w-4 h-4 text-[var(--color-success)] flex-shrink-0" />
                   <span>Obegränsat antal föremål och kvitton</span>
                 </div>
                 <div className="flex items-center gap-2.5">
-                  <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                  <Check className="w-4 h-4 text-[var(--color-success)] flex-shrink-0" />
                   <span>Flera bostäder (t.ex. sommarstuga & förråd)</span>
                 </div>
                 <div className="flex items-center gap-2.5">
-                  <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                  <Check className="w-4 h-4 text-[var(--color-success)] flex-shrink-0" />
                   <span>Hushållsdelning (dela valvet med partner)</span>
                 </div>
                 <div className="flex items-center gap-2.5">
-                  <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                  <Check className="w-4 h-4 text-[var(--color-success)] flex-shrink-0" />
                   <span>Det skarpa skadepaketet & PDF-rapporter</span>
                 </div>
               </div>
@@ -3211,7 +3199,7 @@ export default function HomePage() {
                     setShowProModal(false);
                     showToast("Pro aktiverat (Demoläge) ✓");
                   }}
-                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98]"
+                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-primary)] text-[var(--color-on-primary)] font-bold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98]"
                 >
                   <span>Starta BoValvet Pro (349 kr/år)</span>
                 </button>
@@ -3233,7 +3221,7 @@ export default function HomePage() {
 
         {showProfileModal && (
           <div 
-            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in"
+            className="fixed inset-0 z-50 bg-[var(--color-scrim-strong)] backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in"
             onClick={() => setShowProfileModal(false)}
           >
             <div 
@@ -3249,7 +3237,7 @@ export default function HomePage() {
                     <h2 className="text-[18px] font-extrabold text-[var(--color-text)]">
                       {displayName || "Min Profil"}
                     </h2>
-                    <span className="text-xs text-[var(--color-text-soft)] block">
+                    <span className="text-sm text-[var(--color-text-soft)] block">
                       {sessionUser?.email || "Inloggad"} {isPro ? "· Pro-användare" : ""}
                     </span>
                   </div>
@@ -3266,14 +3254,14 @@ export default function HomePage() {
                 <div className="p-4 rounded-2xl bg-gradient-to-r from-[var(--color-primary-soft)] to-[var(--color-surface)] border border-[var(--color-primary)] flex items-center justify-between">
                   <div>
                     <b className="text-sm block">Uppgradera till Pro</b>
-                    <span className="text-xs text-[var(--color-text-soft)]">Lås upp obegränsade föremål & skadepaket</span>
+                    <span className="text-sm text-[var(--color-text-soft)]">Lås upp obegränsade föremål & skadepaket</span>
                   </div>
                   <button
                     onClick={() => {
                       setShowProfileModal(false);
                       setShowProModal(true);
                     }}
-                    className="px-4 py-2 rounded-xl bg-[var(--color-primary)] text-white text-xs font-bold shadow-xs"
+                    className="px-4 py-2 rounded-xl bg-[var(--color-primary)] text-[var(--color-on-primary)] text-sm font-bold shadow-xs"
                   >
                     Uppgradera
                   </button>
@@ -3281,7 +3269,7 @@ export default function HomePage() {
               )}
 
               <form onSubmit={handleSaveDisplayName} className="space-y-2 p-4 rounded-2xl bg-[var(--color-bg)] border border-[var(--color-border)]">
-                <label className="text-xs font-semibold text-[var(--color-text-soft)] block">Ditt namn i appen</label>
+                <label className="text-sm font-semibold text-[var(--color-text-soft)] block">Ditt namn i appen</label>
                 <div className="flex gap-2">
                   <input
                     type="text"
@@ -3294,12 +3282,12 @@ export default function HomePage() {
                   <button
                     type="submit"
                     disabled={isUpdatingName}
-                    className="min-h-[46px] px-4 rounded-xl bg-[var(--color-primary)] text-white font-bold text-sm flex items-center justify-center shadow-2xs"
+                    className="min-h-[46px] px-4 rounded-xl bg-[var(--color-primary)] text-[var(--color-on-primary)] font-bold text-sm flex items-center justify-center shadow-2xs"
                   >
                     {isUpdatingName ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>Spara</span>}
                   </button>
                 </div>
-                <span className="text-xs text-[var(--color-text-soft)] block">Detta namn visas i hälsningen på startsidan och i rapporter.</span>
+                <span className="text-sm text-[var(--color-text-soft)] block">Detta namn visas i hälsningen på startsidan och i rapporter.</span>
               </form>
 
               <button
@@ -3338,7 +3326,7 @@ export default function HomePage() {
                   <button
                     type="button"
                     onClick={handleSignOut}
-                    className="min-h-[52px] w-full rounded-2xl bg-rose-50 text-rose-700 font-bold text-base flex items-center justify-center gap-2 border border-rose-200 hover:bg-rose-100 transition"
+                    className="min-h-[52px] w-full rounded-2xl bg-[var(--color-danger-bg)] text-[var(--color-danger-text)] font-bold text-base flex items-center justify-center gap-2 border border-[var(--color-danger-border)] hover:bg-[var(--color-danger-bg-strong)] transition"
                   >
                     <LogOut className="w-5 h-5" />
                     <span>Logga ut</span>
@@ -3351,7 +3339,7 @@ export default function HomePage() {
 
         {itemToArchive && (
           <div 
-            className="fixed inset-0 z-60 bg-black/45 flex items-end animate-in fade-in"
+            className="fixed inset-0 z-60 bg-[var(--color-scrim)] flex items-end animate-in fade-in"
             onClick={() => setItemToArchive(null)}
           >
             <div 
@@ -3367,7 +3355,7 @@ export default function HomePage() {
               </p>
 
               <div>
-                <label className="text-xs font-semibold text-[var(--color-text-soft)] block mb-1">Vad hände med föremålet?</label>
+                <label className="text-sm font-semibold text-[var(--color-text-soft)] block mb-1">Vad hände med föremålet?</label>
                 <div className="grid grid-cols-3 gap-2">
                   {["Såld", "Bortskänkt", "Kasserad"].map((reason) => (
                     <button
@@ -3376,7 +3364,7 @@ export default function HomePage() {
                       onClick={() => setArchiveReasonInput(reason)}
                       className={`min-h-[44px] rounded-xl font-bold text-sm border transition ${
                         archiveReasonInput === reason 
-                          ? "bg-[var(--color-primary)] text-white border-[var(--color-primary)]" 
+                          ? "bg-[var(--color-primary)] text-[var(--color-on-primary)] border-[var(--color-primary)]" 
                           : "bg-[var(--color-bg)] border-[var(--color-border)] text-[var(--color-text)]"
                       }`}
                     >
@@ -3390,7 +3378,7 @@ export default function HomePage() {
                 <button
                   type="button"
                   onClick={handleArchiveItem}
-                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2"
+                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-primary)] text-[var(--color-on-primary)] font-bold text-base flex items-center justify-center gap-2"
                 >
                   <span>Spara till Arkivet</span>
                 </button>
@@ -3408,7 +3396,7 @@ export default function HomePage() {
 
         {itemToDelete && (
           <div 
-            className="fixed inset-0 z-60 bg-black/45 flex items-end animate-in fade-in"
+            className="fixed inset-0 z-60 bg-[var(--color-scrim)] flex items-end animate-in fade-in"
             onClick={() => setItemToDelete(null)}
           >
             <div 
@@ -3428,7 +3416,7 @@ export default function HomePage() {
                   type="button"
                   onClick={handleConfirmDelete}
                   disabled={isDeleting}
-                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-danger)] text-white font-bold text-base flex items-center justify-center gap-2"
+                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-danger)] text-[var(--color-on-primary)] font-bold text-base flex items-center justify-center gap-2"
                 >
                   {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>Radera permanent</span>}
                 </button>
@@ -3446,7 +3434,7 @@ export default function HomePage() {
 
         {showEditPhotoOptions && (
           <div 
-            className="fixed inset-0 z-60 bg-black/45 flex items-end"
+            className="fixed inset-0 z-60 bg-[var(--color-scrim)] flex items-end"
             onClick={() => setShowEditPhotoOptions(false)}
           >
             <div 
@@ -3462,7 +3450,7 @@ export default function HomePage() {
                   setShowEditPhotoOptions(false);
                   editItemCameraInputRef.current?.click();
                 }}
-                className="w-full min-h-[56px] rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2"
+                className="w-full min-h-[56px] rounded-2xl bg-[var(--color-primary)] text-[var(--color-on-primary)] font-bold text-base flex items-center justify-center gap-2"
               >
                 <Camera className="w-5 h-5" />
                 <span>Ta foto med kameran</span>
@@ -3485,7 +3473,7 @@ export default function HomePage() {
 
         {showAddActionSheet && (
           <div 
-            className="fixed inset-0 z-50 bg-black/45 flex items-end animate-in fade-in"
+            className="fixed inset-0 z-50 bg-[var(--color-scrim)] flex items-end animate-in fade-in"
             onClick={() => setShowAddActionSheet(false)}
           >
             <div 
@@ -3502,7 +3490,7 @@ export default function HomePage() {
                     setShowAddActionSheet(false);
                     setShowRoomPickerScreen(true);
                   }}
-                  className="w-full min-h-[72px] rounded-2xl bg-[var(--color-primary)] text-white p-4 flex items-center gap-3.5 text-left active:scale-[.98] transition"
+                  className="w-full min-h-[72px] rounded-2xl bg-[var(--color-primary)] text-[var(--color-on-primary)] p-4 flex items-center gap-3.5 text-left active:scale-[.98] transition"
                 >
                   <span className="text-3xl">📷</span>
                   <div>
@@ -3547,7 +3535,7 @@ export default function HomePage() {
 
         {viewingReceiptUrl && (
           <div 
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-xs animate-in fade-in" 
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[var(--color-scrim-opaque)] backdrop-blur-xs animate-in fade-in" 
             onClick={() => setViewingReceiptUrl(null)}
           >
             <div 
@@ -3563,7 +3551,7 @@ export default function HomePage() {
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <div className="w-full max-h-[75vh] overflow-auto rounded-2xl bg-white flex items-center justify-center p-1">
+              <div className="w-full max-h-[75vh] overflow-auto rounded-2xl bg-[var(--color-surface)] flex items-center justify-center p-1">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={viewingReceiptUrl} alt="Kvitto" className="max-h-[70vh] w-auto object-contain rounded-xl" />
               </div>
@@ -3578,7 +3566,7 @@ export default function HomePage() {
         )}
 
         {listingModalItem && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
+          <div className="fixed inset-0 z-50 bg-[var(--color-scrim-strong)] backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
             <div className="bg-[var(--color-surface)] rounded-t-[32px] sm:rounded-3xl p-5 w-full max-w-[440px] border border-[var(--color-border)] space-y-4 max-h-[90vh] overflow-y-auto shadow-2xl animate-in slide-in-from-bottom">
               
               <div className="flex items-center justify-between pb-2 border-b border-[var(--color-border)]">
@@ -3593,7 +3581,7 @@ export default function HomePage() {
                   </div>
                   <div className="min-w-0">
                     <b className="text-base text-[var(--color-text)] block truncate">{listingModalItem.title}</b>
-                    <span className="text-xs text-[var(--color-text-soft)] block">Välj var du vill sälja</span>
+                    <span className="text-sm text-[var(--color-text-soft)] block">Välj var du vill sälja</span>
                   </div>
                 </div>
                 <button onClick={() => setListingModalItem(null)} className="p-2 text-[var(--color-text-soft)]">
@@ -3605,7 +3593,7 @@ export default function HomePage() {
                 <div className="py-12 text-center space-y-3">
                   <Loader2 className="w-8 h-8 animate-spin mx-auto text-[var(--color-primary)]" />
                   <p className="text-base font-bold text-[var(--color-text)]">AI formulerar säljande annonstext...</p>
-                  <span className="text-xs text-[var(--color-text-soft)]">Analyserar skick, märke och optimerar priser.</span>
+                  <span className="text-sm text-[var(--color-text-soft)]">Analyserar skick, märke och optimerar priser.</span>
                 </div>
               )}
 
@@ -3616,46 +3604,46 @@ export default function HomePage() {
                     <button
                       type="button"
                       onClick={() => setActiveListingTab("blocket")}
-                      className={`py-2 px-1 rounded-xl font-bold text-xs flex flex-col items-center gap-0.5 transition ${
+                      className={`py-2 px-1 rounded-xl font-bold text-sm flex flex-col items-center gap-0.5 transition ${
                         activeListingTab === "blocket" 
-                          ? "bg-[var(--color-surface)] text-rose-600 shadow-xs border border-[var(--color-border)]" 
+                          ? "bg-[var(--color-surface)] text-[var(--color-danger-strong)] shadow-xs border border-[var(--color-border)]" 
                           : "text-[var(--color-text-soft)] opacity-70"
                       }`}
                     >
                       <span className="font-black text-sm">Blocket</span>
-                      <span className="text-[10px] font-medium">Populärast</span>
+                      <span className="text-sm font-medium">Populärast</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={() => setActiveListingTab("marketplace")}
-                      className={`py-2 px-1 rounded-xl font-bold text-xs flex flex-col items-center gap-0.5 transition ${
+                      className={`py-2 px-1 rounded-xl font-bold text-sm flex flex-col items-center gap-0.5 transition ${
                         activeListingTab === "marketplace" 
-                          ? "bg-[var(--color-surface)] text-blue-600 shadow-xs border border-[var(--color-border)]" 
+                          ? "bg-[var(--color-surface)] text-[var(--color-info)] shadow-xs border border-[var(--color-border)]" 
                           : "text-[var(--color-text-soft)] opacity-70"
                       }`}
                     >
                       <span className="font-black text-sm">Marketplace</span>
-                      <span className="text-[10px] font-medium">Lokalt & snabbt</span>
+                      <span className="text-sm font-medium">Lokalt & snabbt</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={() => setActiveListingTab("tradera")}
-                      className={`py-2 px-1 rounded-xl font-bold text-xs flex flex-col items-center gap-0.5 transition ${
+                      className={`py-2 px-1 rounded-xl font-bold text-sm flex flex-col items-center gap-0.5 transition ${
                         activeListingTab === "tradera" 
-                          ? "bg-[var(--color-surface)] text-amber-600 shadow-xs border border-[var(--color-border)]" 
+                          ? "bg-[var(--color-surface)] text-[var(--color-warn-strong)] shadow-xs border border-[var(--color-border)]" 
                           : "text-[var(--color-text-soft)] opacity-70"
                       }`}
                     >
                       <span className="font-black text-sm">Tradera</span>
-                      <span className="text-[10px] font-medium">Auktion</span>
+                      <span className="text-sm font-medium">Auktion</span>
                     </button>
                   </div>
 
                   <div className="bg-[var(--color-surface)] p-3.5 rounded-2xl border border-[var(--color-border)] flex items-center justify-between">
                     <div>
-                      <span className="text-xs text-[var(--color-text-soft)] block font-semibold">
+                      <span className="text-sm text-[var(--color-text-soft)] block font-semibold">
                         {activeListingTab === "tradera" ? "Föreslaget startbud" : "Rekommenderat säljpris"}
                       </span>
                       <b className="text-2xl font-black text-[var(--color-text)]">
@@ -3664,7 +3652,7 @@ export default function HomePage() {
                           : `${listingData.suggested_price_sek || listingModalItem.market_value_sek} kr`}
                       </b>
                     </div>
-                    <span className="text-xs font-bold px-3 py-1.5 rounded-xl bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
+                    <span className="text-sm font-bold px-3 py-1.5 rounded-xl bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
                       Baserat på skick: {listingModalItem.condition}
                     </span>
                   </div>
@@ -3673,7 +3661,7 @@ export default function HomePage() {
                     <button
                       type="button"
                       onClick={() => handleLaunchPlatform(activeListingTab)}
-                      className="min-h-[58px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-extrabold text-[17px] flex items-center justify-center gap-2.5 shadow-md active:scale-[.98] transition"
+                      className="min-h-[58px] w-full rounded-2xl bg-[var(--color-primary)] text-[var(--color-on-primary)] font-extrabold text-[17px] flex items-center justify-center gap-2.5 shadow-md active:scale-[.98] transition"
                     >
                       <span>
                         {activeListingTab === "blocket" && "🚀 Skapa annons på Blocket"}
@@ -3682,17 +3670,17 @@ export default function HomePage() {
                       </span>
                     </button>
 
-                    <div className="p-3 bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] text-xs text-[var(--color-text-soft)] space-y-1">
+                    <div className="p-3 bg-[var(--color-bg)] rounded-xl border border-[var(--color-border)] text-sm text-[var(--color-text-soft)] space-y-1">
                       <div className="flex items-center gap-2">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                        <CheckCircle2 className="w-3.5 h-3.5 text-[var(--color-success)] flex-shrink-0" />
                         <span>Den utskurna närbilden sparas i telefonens album</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                        <CheckCircle2 className="w-3.5 h-3.5 text-[var(--color-success)] flex-shrink-0" />
                         <span>Komplett annonstext kopieras till urklipp</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                        <CheckCircle2 className="w-3.5 h-3.5 text-[var(--color-success)] flex-shrink-0" />
                         <span>
                           {activeListingTab === "blocket" && "Blocket öppnas – välj Torget och klistra in!"}
                           {activeListingTab === "marketplace" && "Marketplace öppnas direkt i annonsläget – klistra in!"}
@@ -3704,7 +3692,7 @@ export default function HomePage() {
 
                   <div className="pt-2 border-t border-[var(--color-border)] space-y-3">
                     <div className="space-y-1">
-                      <div className="flex justify-between items-center text-xs font-semibold text-[var(--color-text-soft)]">
+                      <div className="flex justify-between items-center text-sm font-semibold text-[var(--color-text-soft)]">
                         <span>Rubrik</span>
                         <button 
                           onClick={() => copyToClipboard(activeListingTab === "tradera" ? listingData.tradera_title : listingData.blocket_title, "titel")} 
@@ -3719,7 +3707,7 @@ export default function HomePage() {
                     </div>
 
                     <div className="space-y-1">
-                      <div className="flex justify-between items-center text-xs font-semibold text-[var(--color-text-soft)]">
+                      <div className="flex justify-between items-center text-sm font-semibold text-[var(--color-text-soft)]">
                         <span>Beskrivning</span>
                         <button 
                           onClick={() => copyToClipboard(activeListingTab === "tradera" ? listingData.tradera_body : listingData.blocket_body, "body")} 
@@ -3728,7 +3716,7 @@ export default function HomePage() {
                           {copiedText === "body" ? "Kopierad!" : "Kopiera text"}
                         </button>
                       </div>
-                      <div className="p-3 rounded-xl bg-[var(--color-bg)] font-medium text-xs max-h-36 overflow-y-auto whitespace-pre-line border border-[var(--color-border)] leading-relaxed text-[var(--color-text)]">
+                      <div className="p-3 rounded-xl bg-[var(--color-bg)] font-medium text-sm max-h-36 overflow-y-auto whitespace-pre-line border border-[var(--color-border)] leading-relaxed text-[var(--color-text)]">
                         {activeListingTab === "tradera" ? listingData.tradera_body : listingData.blocket_body}
                       </div>
                     </div>
@@ -3742,7 +3730,7 @@ export default function HomePage() {
         )}
 
         {showIncidentModal && (
-          <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 bg-[var(--color-scrim-medium)] flex items-center justify-center p-4">
             <div className="bg-[var(--color-surface)] rounded-3xl p-5 w-full max-w-sm border border-[var(--color-border)] space-y-4 max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center">
                 <b className="text-base text-[var(--color-text)]">Skapa Skadeanmälan</b>
@@ -3753,7 +3741,7 @@ export default function HomePage() {
 
               <div className="space-y-3 text-base">
                 <div>
-                  <label className="text-xs font-semibold text-[var(--color-text-soft)] block mb-1">Typ av skada</label>
+                  <label className="text-sm font-semibold text-[var(--color-text-soft)] block mb-1">Typ av skada</label>
                   <div className="grid grid-cols-2 gap-1.5">
                     {INCIDENT_TYPES.map((t) => (
                       <button
@@ -3772,7 +3760,7 @@ export default function HomePage() {
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-xs font-semibold text-[var(--color-text-soft)] block mb-0.5">Datum</label>
+                    <label className="text-sm font-semibold text-[var(--color-text-soft)] block mb-0.5">Datum</label>
                     <input 
                       type="date" 
                       value={incidentDate} 
@@ -3781,7 +3769,7 @@ export default function HomePage() {
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-semibold text-[var(--color-text-soft)] block mb-0.5">Polisnr</label>
+                    <label className="text-sm font-semibold text-[var(--color-text-soft)] block mb-0.5">Polisnr</label>
                     <input 
                       type="text" 
                       placeholder="Valfritt" 
@@ -3793,7 +3781,7 @@ export default function HomePage() {
                 </div>
 
                 <div>
-                  <span className="text-xs font-semibold text-[var(--color-text-soft)] block mb-1">Välj drabbat rum</span>
+                  <span className="text-sm font-semibold text-[var(--color-text-soft)] block mb-1">Välj drabbat rum</span>
                   <div className="flex flex-wrap gap-1">
                     {roomKeys.map((r) => (
                       <button
@@ -3817,7 +3805,7 @@ export default function HomePage() {
                         onClick={() => toggleIncidentItem(item.id)}
                         className={`p-2.5 rounded-lg cursor-pointer flex items-center gap-2 text-sm ${isSelected ? "bg-[var(--color-surface)] font-bold shadow-2xs" : "opacity-60"}`}
                       >
-                        {isSelected ? <CheckSquare className="w-4 h-4 text-rose-600" /> : <Square className="w-4 h-4 opacity-40" />}
+                        {isSelected ? <CheckSquare className="w-4 h-4 text-[var(--color-danger-strong)]" /> : <Square className="w-4 h-4 opacity-40" />}
                         <span className="truncate">{item.title} ({Number(item.estimated_replacement_cost_sek).toLocaleString("sv-SE")} kr)</span>
                       </div>
                     );
@@ -3832,7 +3820,7 @@ export default function HomePage() {
                   type="button"
                   onClick={handleGenerateIncidentReport}
                   disabled={selectedIncidentItemIds.length === 0}
-                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2 shadow-sm"
+                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-primary)] text-[var(--color-on-primary)] font-bold text-base flex items-center justify-center gap-2 shadow-sm"
                 >
                   <FileDown className="w-5 h-5" />
                   <span>Ladda ner Skadepaket (PDF)</span>
@@ -3843,7 +3831,7 @@ export default function HomePage() {
         )}
 
         {showManualModal && (
-          <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 bg-[var(--color-scrim-medium)] flex items-center justify-center p-4">
             <div className="bg-[var(--color-surface)] rounded-3xl p-5 w-full max-w-sm border border-[var(--color-border)] space-y-3">
               <div className="flex justify-between items-center">
                 <b className="text-base text-[var(--color-text)]">Lägg till själv</b>
@@ -3854,7 +3842,7 @@ export default function HomePage() {
 
               <form onSubmit={handleSaveManualItem} className="space-y-3 text-base">
                 <div>
-                  <label className="text-xs font-semibold text-[var(--color-text-soft)] block mb-0.5">Benämning</label>
+                  <label className="text-sm font-semibold text-[var(--color-text-soft)] block mb-0.5">Benämning</label>
                   <input
                     type="text"
                     required
@@ -3867,7 +3855,7 @@ export default function HomePage() {
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-xs font-semibold text-[var(--color-text-soft)] block mb-0.5">Rum</label>
+                    <label className="text-sm font-semibold text-[var(--color-text-soft)] block mb-0.5">Rum</label>
                     <select
                       value={manualFormData.room || activeRoom}
                       onChange={(e) => setManualFormData({ ...manualFormData, room: e.target.value })}
@@ -3877,7 +3865,7 @@ export default function HomePage() {
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs font-semibold text-[var(--color-text-soft)] block mb-0.5">Nypris (SEK)</label>
+                    <label className="text-sm font-semibold text-[var(--color-text-soft)] block mb-0.5">Nypris (SEK)</label>
                     <input
                       type="number"
                       required
@@ -3892,7 +3880,7 @@ export default function HomePage() {
                 <button
                   type="submit"
                   disabled={isSavingManual}
-                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2 shadow-sm"
+                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-primary)] text-[var(--color-on-primary)] font-bold text-base flex items-center justify-center gap-2 shadow-sm"
                 >
                   {isSavingManual ? <Loader2 className="w-5 h-5 animate-spin" /> : <span>Spara föremål</span>}
                 </button>
@@ -3902,7 +3890,7 @@ export default function HomePage() {
         )}
 
         {showPropertyModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in overflow-y-auto">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[var(--color-scrim-strong)] backdrop-blur-xs animate-in fade-in overflow-y-auto">
             <div className="bg-[var(--color-surface)] rounded-3xl p-5 w-full max-w-sm shadow-2xl border border-[var(--color-border)] space-y-4 my-8 max-h-[90vh] overflow-y-auto">
               <div className="flex items-center justify-between pb-1 border-b border-[var(--color-border)]">
                 <h3 className="font-bold text-base text-[var(--color-text)] flex items-center space-x-1.5">
@@ -3935,9 +3923,9 @@ export default function HomePage() {
                         <div>
                           <div className="flex items-center space-x-1.5">
                             <h4 className="font-bold text-sm text-[var(--color-text)]">{p.name}</h4>
-                            {p.living_area_sqm && <span className="text-xs bg-[var(--color-surface)] text-[var(--color-text-soft)] px-2 py-0.5 rounded font-medium">{p.living_area_sqm} m²</span>}
+                            {p.living_area_sqm && <span className="text-sm bg-[var(--color-surface)] text-[var(--color-text-soft)] px-2 py-0.5 rounded font-medium">{p.living_area_sqm} m²</span>}
                           </div>
-                          <p className="text-xs text-[var(--color-text-soft)] mt-0.5">{p.property_type} • {p.insurance_company || "Försäkringsbolag"}</p>
+                          <p className="text-sm text-[var(--color-text-soft)] mt-0.5">{p.property_type} • {p.insurance_company || "Försäkringsbolag"}</p>
                         </div>
                         <button
                           onClick={(e) => {
@@ -3945,7 +3933,7 @@ export default function HomePage() {
                             setPropertyFormData(p);
                             setIsEditingProperty(true);
                           }}
-                          className="text-xs text-[var(--color-primary)] font-bold px-2.5 py-1.5 rounded hover:bg-[var(--color-primary-soft)]"
+                          className="text-sm text-[var(--color-primary)] font-bold px-2.5 py-1.5 rounded hover:bg-[var(--color-primary-soft)]"
                         >
                           Ändra
                         </button>
@@ -4014,7 +4002,7 @@ export default function HomePage() {
                   className="space-y-3 text-sm"
                 >
                   <div>
-                    <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Bostadens namn</label>
+                    <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-sm">Bostadens namn</label>
                     <input
                       type="text"
                       required
@@ -4026,7 +4014,7 @@ export default function HomePage() {
 
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Typ</label>
+                      <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-sm">Typ</label>
                       <select
                         value={propertyFormData.property_type || "Bostadsrätt"}
                         onChange={(e) => setPropertyFormData({ ...propertyFormData, property_type: e.target.value })}
@@ -4040,7 +4028,7 @@ export default function HomePage() {
                       </select>
                     </div>
                     <div>
-                      <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Boyta (kvm)</label>
+                      <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-sm">Boyta (kvm)</label>
                       <input
                         type="number"
                         value={propertyFormData.living_area_sqm || ""}
@@ -4052,7 +4040,7 @@ export default function HomePage() {
 
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Lösörestak (SEK)</label>
+                      <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-sm">Lösörestak (SEK)</label>
                       <input
                         type="number"
                         value={propertyFormData.coverage_limit_sek || 1000000}
@@ -4061,7 +4049,7 @@ export default function HomePage() {
                       />
                     </div>
                     <div>
-                      <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-xs">Bolag</label>
+                      <label className="font-semibold text-[var(--color-text-soft)] block mb-1 text-sm">Bolag</label>
                       <input
                         type="text"
                         placeholder="t.ex. Folksam"
@@ -4073,7 +4061,7 @@ export default function HomePage() {
                   </div>
 
                   <div className="pt-2 flex space-x-2">
-                    <button type="submit" disabled={isSavingProperty} className="flex-1 py-3 bg-[var(--color-primary)] text-white rounded-xl font-bold text-sm">
+                    <button type="submit" disabled={isSavingProperty} className="flex-1 py-3 bg-[var(--color-primary)] text-[var(--color-on-primary)] rounded-xl font-bold text-sm">
                       {isSavingProperty ? "Sparar..." : "Spara"}
                     </button>
                     <button type="button" onClick={() => setIsEditingProperty(false)} className="px-4 py-3 bg-[var(--color-border)] text-[var(--color-text)] rounded-xl text-sm font-semibold">
@@ -4087,7 +4075,7 @@ export default function HomePage() {
         )}
 
         {showAuthModal && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 bg-[var(--color-scrim-strong)] backdrop-blur-xs flex items-center justify-center p-4">
             <div className="bg-[var(--color-surface)] rounded-3xl p-6 w-full max-w-sm border border-[var(--color-border)] space-y-4 shadow-xl">
               <div className="text-center space-y-1">
                 <div className="w-12 h-12 rounded-2xl bg-[var(--color-primary-soft)] text-[var(--color-primary)] flex items-center justify-center mx-auto font-black text-lg">
@@ -4102,7 +4090,7 @@ export default function HomePage() {
               </div>
 
               {authError && (
-                <div className="bg-rose-50 text-rose-800 p-2.5 rounded-xl text-sm">
+                <div className="bg-[var(--color-danger-bg)] text-[var(--color-danger-text)] p-2.5 rounded-xl text-sm">
                   {authError}
                 </div>
               )}
@@ -4112,16 +4100,16 @@ export default function HomePage() {
                   type="button"
                   onClick={() => handleSocialLogin("google")}
                   disabled={Boolean(socialLoading) || authLoading}
-                  className="min-h-[46px] w-full rounded-xl bg-white text-stone-800 font-bold text-sm border border-[var(--color-border)] flex items-center justify-center gap-2.5 shadow-2xs hover:bg-stone-50 transition active:scale-[.98] disabled:opacity-50"
+                  className="min-h-[46px] w-full rounded-xl bg-[var(--color-surface)] text-[var(--color-text)] font-bold text-sm border border-[var(--color-border)] flex items-center justify-center gap-2.5 shadow-2xs hover:bg-[var(--color-surface-subtle)] transition active:scale-[.98] disabled:opacity-50"
                 >
                   {socialLoading === "google" ? (
-                    <Loader2 className="w-4 h-4 animate-spin text-stone-600" />
+                    <Loader2 className="w-4 h-4 animate-spin text-[var(--color-text-soft)]" />
                   ) : (
                     <svg className="w-4 h-4" viewBox="0 0 24 24">
-                      <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
-                      <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.36 24 12 24z"/>
-                      <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
-                      <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.36 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
+                      <path fill="var(--color-google-blue)" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
+                      <path fill="var(--color-google-green)" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.36 24 12 24z"/>
+                      <path fill="var(--color-google-yellow)" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
+                      <path fill="var(--color-google-red)" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.36 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
                     </svg>
                   )}
                   <span>Fortsätt med Google</span>
@@ -4131,10 +4119,10 @@ export default function HomePage() {
                   type="button"
                   onClick={() => handleSocialLogin("facebook")}
                   disabled={Boolean(socialLoading) || authLoading}
-                  className="min-h-[46px] w-full rounded-xl bg-[#1877F2] text-white font-bold text-sm flex items-center justify-center gap-2.5 shadow-2xs hover:bg-[#166fe5] transition active:scale-[.98] disabled:opacity-50"
+                  className="min-h-[46px] w-full rounded-xl bg-[var(--color-facebook)] text-[var(--color-on-primary)] font-bold text-sm flex items-center justify-center gap-2.5 shadow-2xs hover:bg-[var(--color-facebook-hover)] transition active:scale-[.98] disabled:opacity-50"
                 >
                   {socialLoading === "facebook" ? (
-                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <Loader2 className="w-4 h-4 animate-spin text-[var(--color-on-primary)]" />
                   ) : (
                     <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
                       <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
@@ -4144,7 +4132,7 @@ export default function HomePage() {
                 </button>
               </div>
 
-              <div className="flex items-center gap-3 my-2 text-xs text-[var(--color-text-soft)]">
+              <div className="flex items-center gap-3 my-2 text-sm text-[var(--color-text-soft)]">
                 <div className="h-px bg-[var(--color-border)] flex-1" />
                 <span>eller med e-post</span>
                 <div className="h-px bg-[var(--color-border)] flex-1" />
@@ -4171,7 +4159,7 @@ export default function HomePage() {
                 <button
                   type="submit"
                   disabled={authLoading || Boolean(socialLoading)}
-                  className="min-h-[50px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-base flex items-center justify-center gap-2"
+                  className="min-h-[50px] w-full rounded-2xl bg-[var(--color-primary)] text-[var(--color-on-primary)] font-bold text-base flex items-center justify-center gap-2"
                 >
                   {authLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <span>{authIsSignUp ? "Skapa konto & Säkra föremål" : "Logga in"}</span>}
                 </button>
