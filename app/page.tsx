@@ -2303,7 +2303,7 @@ export default function HomePage() {
                     onClick={() => setMultiReviewStep(multiReviewStep + 1)}
                     className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-extrabold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98]"
                   >
-                    <span>Godkänn & Nästa ({multiReviewStep + 2} av {multiResults.length}) →</span>
+                    <span>Godkänn & gå till nästa föremål →</span>
                   </button>
                 ) : (
                   <button
@@ -3007,6 +3007,11 @@ export default function HomePage() {
                   )}
                 </div>
               </div>
+
+              <p className="text-sm text-[var(--color-text-soft)] text-center pt-2 pb-4">
+                BoValvet version {process.env.APP_VERSION}
+                {process.env.APP_BUILD ? ` · ${process.env.APP_BUILD}` : ""}
+              </p>
             </div>
           )}
 

@@ -1,7 +1,7 @@
 # 📘 BoValvet – Komplett Projektdokumentation, Historia & Teknisk Analys
 
 **Senast uppdaterad:** 2026-11-17  
-**Kodbas / Applikation:** BoValvet (`bovalvet` v0.1.0)  
+**Kodbas / Applikation:** BoValvet (`bovalvet` v0.2.0)  
 **GitHub-repo:** `Kmatiq/bovalvet` (branch `main`)  
 **Källa för sanningen:** GitHub-repot. AI Studio används inte längre (se avsnitt 4.6).  
 
@@ -125,7 +125,8 @@ Nedan sammanfattas projektets utvecklingsresa från start till nuvarande läge:
      * `fetchProperties`, `fetchPropertyMembers`, `fetchVaultStats` och `fetchVaultItems` flyttades upp ovanför de `useEffect` som använder dem.
    * **Medvetet bortvalt:** Supabase-inställningar i gränssnittet (`/api/setup-supabase`, nycklar i `localStorage`, rutan "Anslut till ditt Supabase-moln"), halvt borttagen demo-/lokal föremålslagring (`bovalvet_local_items`), `/api/download-docs`, Vite-rester (`src/`, `server.ts`, `vite.config.ts`, `index.html`, `metadata.json`, `bun.lock`) samt avstängd TypeScript-strikthet (`strict: false`).
    * **Beslut:** AI Studio används inte längre. All utveckling sker mot GitHub-repot.
-   * Grenen **`Deep-Code`** (6 okt 2026, "städa, harmonisera och typa kodbasen") finns kvar på GitHub men är inte ihopslagen med `main`. Den tar bl.a. bort `ROADMAP.md` och behöver granskas innan den används.
+   * Grenen **`Deep-Code`** (6 okt 2026) var ett experiment med DeepSeek via VS Code och togs bort på ägarens begäran (sista commit `51e309b`).
+   * Ett **versionsnummer** infördes (v0.2.0). Det visas längst ned under *Mer* tillsammans med byggdatum och kod för senaste ändringen.
 
 ---
 
@@ -218,7 +219,6 @@ Dessa regler måste alltid följas vid fortsatt utveckling av BoValvet:
 2. **Städa upp kodbasen (Teknisk skuld):**
    * Dela upp `app/page.tsx` i mindre moduler under `app/components/` eller `components/`.
    * Ta bort döda/dubblerade filer (`lib/generatePdfReport.ts`, `app/actions/analyzeItemAction.ts`) som inte längre används.
-   * Ta ställning till grenen `Deep-Code`.
    * Migrera `analyze-receipt` och `generate-listing` till `@google/genai` och ta bort `@google/generative-ai`.
 3. **Färdigställ `ROADMAP.md`-detaljer:**
    * Slutför eller dölj `property_members`-inbjudningar tills RLS-policyn i Supabase är testad.

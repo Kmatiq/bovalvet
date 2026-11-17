@@ -21,6 +21,7 @@ Denna fil fungerar som projektets permanenta minne och handlingsplan. Den uppdat
   - Borttagning av förbjuden `text-xs` till förmån för tydlig `text-sm` (14 px) och `text-base` (16 px).
   - Centraliserad `openEditItem`-funktion för konsekvent beteende.
 - [x] **Samordning AI Studio → GitHub (2026-11-17):** GitHub är nu enda källan. AI Studio-versionen sparad på grenen `aistudio-backup`. Offlineläget borttaget (inga påhittade "Sparat offline"-föremål längre), knappen "Lägg till föremål manuellt" tillagd i välkomstvyn. Se `DOKUMENTATION.md`.
+- [x] **Versionsnummer i appen (v0.2.0):** Visas längst ned under *Mer*, t.ex. "BoValvet version 0.2.0 · 2026-11-17 (f07058b)", så att man ser vilken version som ligger ute.
 
 ---
 
@@ -65,4 +66,5 @@ Denna fil fungerar som projektets permanenta minne och handlingsplan. Den uppdat
 2. **Under utveckling:** Bocka av delmoment när de är färdigställda och verifierade med `npm run build`.
 3. **Vid avslut/commit:** Se till att `ROADMAP.md` speglar det aktuella läget.
 4. **Endast GitHub:** Ingen utveckling i AI Studio. Allt arbete sker mot `Kmatiq/bovalvet`.
+5. **Versionsnummer:** Höj `version` i `package.json` (och `package-lock.json`) vid varje ny release. Versionen, datumet och koden för senaste ändringen visas längst ned under *Mer* i appen.
 
