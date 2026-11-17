@@ -1,0 +1,10 @@
+{
+  "name": "Heminventering AI",
+  "description": "Smart och enkel heminventering med AI. Fota dina prylar i hemmet och få automatiskt namn, rum, skick, antal och uppskattat värde för försäkring och ordning.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

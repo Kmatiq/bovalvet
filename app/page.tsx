@@ -59,10 +59,19 @@ import {
   SlidersHorizontal,
   MapPin,
   FolderPlus,
-  ArrowRight
+  ArrowRight,
+  Database,
+  Key,
+  RefreshCw
 } from "lucide-react";
 import { sanitizeAndCompressImage } from "@/lib/sanitizeImage";
-import { supabase } from "@/lib/supabaseClient";
+import { 
+  supabase, 
+  isSupabaseConfigured, 
+  getStoredSupabaseConfig, 
+  saveSupabaseConfig, 
+  clearSupabaseConfig 
+} from "@/lib/supabaseClient";
 import { exportToCsv, generateVaultPdf, generateIncidentPdf } from "@/lib/exportVault";
 
 const STANDARD_ROOMS: Record<string, string> = {
@@ -381,9 +390,6 @@ export default function HomePage() {
   const [currentNav, setCurrentNav] = useState<"home" | "rooms" | "insurance" | "more">("home");
   const [sessionUser, setSessionUser] = useState<any>(null);
 
-  const [isOnline, setIsOnline] = useState(true);
-  const [offlineQueue, setOfflineQueue] = useState<any[]>([]);
-
   const [displayName, setDisplayName] = useState<string>("");
   const [displayNameInput, setDisplayNameInput] = useState<string>("");
   const [isUpdatingName, setIsUpdatingName] = useState(false);
@@ -487,6 +493,11 @@ export default function HomePage() {
   const [socialLoading, setSocialLoading] = useState<"google" | "facebook" | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
 
+  const [showSupabaseConfigModal, setShowSupabaseConfigModal] = useState(false);
+  const [supabaseUrlInput, setSupabaseUrlInput] = useState("");
+  const [supabaseKeyInput, setSupabaseKeyInput] = useState("");
+  const [isSupabaseConnectedState, setIsSupabaseConnectedState] = useState(false);
+
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -502,6 +513,48 @@ export default function HomePage() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
+  const handleSaveSupabaseConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanUrl = supabaseUrlInput.trim();
+    const cleanKey = supabaseKeyInput.trim();
+    if (!cleanUrl || !cleanKey) {
+      alert("Vänligen ange både Supabase URL och Anon Key.");
+      return;
+    }
+
+    try {
+      await fetch("/api/setup-supabase", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: cleanUrl, anonKey: cleanKey }),
+      });
+    } catch (err) {
+      console.warn("Kunde inte spara till .env.local via API:", err);
+    }
+
+    saveSupabaseConfig(cleanUrl, cleanKey);
+    setIsSupabaseConnectedState(true);
+    setShowSupabaseConfigModal(false);
+    showToast("Supabase anslutet! Laddar om...");
+    setTimeout(() => {
+      window.location.reload();
+    }, 400);
+  };
+
+  const handleClearSupabaseConfig = () => {
+    if (confirm("Vill du koppla bort sparade Supabase-uppgifter?")) {
+      clearSupabaseConfig();
+      setSupabaseUrlInput("");
+      setSupabaseKeyInput("");
+      setIsSupabaseConnectedState(false);
+      setShowSupabaseConfigModal(false);
+      showToast("Supabase frånkopplat.");
+      setTimeout(() => {
+        window.location.reload();
+      }, 400);
+    }
+  };
+
   const openEditItem = (item: VaultItem) => {
     setEditingItem({ ...item, property_id: item.property_id || selectedProperty?.id });
     setActiveImageIndex(0);
@@ -514,6 +567,21 @@ export default function HomePage() {
       if (savedCustom) setCustomRooms(JSON.parse(savedCustom));
       const savedRemoved = localStorage.getItem("bovalvet_removed_rooms");
       if (savedRemoved) setRemovedRooms(JSON.parse(savedRemoved));
+
+      const cfg = getStoredSupabaseConfig();
+      setIsSupabaseConnectedState(cfg.isConfigured);
+      setSupabaseUrlInput(cfg.url && !cfg.url.includes("placeholder") ? cfg.url : "");
+      setSupabaseKeyInput(cfg.anonKey && !cfg.anonKey.includes("placeholder") ? cfg.anonKey : "");
+
+      const savedLocalItems = localStorage.getItem("bovalvet_local_items");
+      if (savedLocalItems) {
+        const parsed = JSON.parse(savedLocalItems);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setVaultItems(parsed);
+          const sum = parsed.reduce((acc: number, it: VaultItem) => acc + (Number(it.estimated_replacement_cost_sek) || 0), 0);
+          setTotalValuationSek(sum);
+        }
+      }
     } catch (e) {
       console.error(e);
     }
@@ -742,219 +810,67 @@ export default function HomePage() {
     };
   }, [isAnalyzing]);
 
-  useEffect(() => {
-    setIsOnline(navigator.onLine);
-
-    const handleOnline = () => {
-      setIsOnline(true);
-      showToast("Åter ansluten till nätet ✓");
-      processOfflineQueue();
-    };
-
-    const handleOffline = () => {
-      setIsOnline(false);
-      showToast("Tappade anslutningen. Offlineläge aktivt.");
-    };
-
-    window.addEventListener("online", handleOnline);
-    window.addEventListener("offline", handleOffline);
-
-    const savedQueue = localStorage.getItem("bovalvet_offline_queue");
-    if (savedQueue) {
-      try {
-        setOfflineQueue(JSON.parse(savedQueue));
-      } catch (e) {
-        console.error(e);
-      }
-    }
-
-    return () => {
-      window.removeEventListener("online", handleOnline);
-      window.removeEventListener("offline", handleOffline);
-    };
-  }, []);
-
-  const processOfflineQueue = async () => {
-    const queue = JSON.parse(localStorage.getItem("bovalvet_offline_queue") || "[]");
-    if (queue.length === 0 || !sessionUser) return;
-
-    showToast(`Synkar ${queue.length} offline-sparade föremål...`);
-
-    const remainingQueue = [];
-    for (const item of queue) {
-      try {
-        await supabase.from("items").insert({
-          user_id: sessionUser.id,
-          property_id: selectedProperty?.id || null,
-          title: item.title,
-          category: item.category,
-          room: item.room,
-          brand: item.brand,
-          model: item.model,
-          estimated_replacement_cost_sek: item.estimated_replacement_cost_sek,
-          market_value_sek: item.market_value_sek,
-          condition: item.condition,
-          is_archived: false
-        });
-      } catch (err) {
-        remainingQueue.push(item);
-      }
-    }
-
-    localStorage.setItem("bovalvet_offline_queue", JSON.stringify(remainingQueue));
-    setOfflineQueue(remainingQueue);
-    if (sessionUser) {
-      fetchVaultStats(sessionUser.id, selectedProperty?.id);
-      fetchVaultItems(sessionUser.id, selectedProperty?.id);
-    }
-    showToast("Synkning klar ✓");
-  };
-
-  const processPendingGuestData = async (userId: string) => {
-    const pendingJson = localStorage.getItem("bovalvet_pending_guest_item");
-    if (!pendingJson) return;
-
+  const fetchVaultStats = async (userId: string, propertyId?: string) => {
     try {
-      const pending = JSON.parse(pendingJson);
-      localStorage.removeItem("bovalvet_pending_guest_item");
+      let query = supabase.from("items").select("estimated_replacement_cost_sek").eq("user_id", userId).eq("is_archived", false);
+      if (propertyId) query = query.eq("property_id", propertyId);
+      const { data, error } = await query;
 
-      showToast("Sparar dina fotade föremål till ditt valv...");
-
-      if (pending.base64ForSave && (pending.result || (pending.multiResults && pending.multiResults.length > 0))) {
-        const byteCharacters = atob(pending.base64ForSave);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
-        const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], { type: "image/jpeg" });
-        const fileName = `${userId}/${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`;
-
-        await supabase.storage.from("item-photos").upload(fileName, blob, { 
-          contentType: "image/jpeg", 
-          upsert: true 
-        });
-
-        if (pending.multiResults && pending.multiResults.length > 0) {
-          const inserts = pending.multiResults.map((item: any) => ({
-            user_id: userId,
-            property_id: selectedProperty?.id || null,
-            title: item.title,
-            category: item.category,
-            room: pending.room || "Vardagsrum",
-            brand: item.brand || "",
-            model: item.model || "",
-            estimated_replacement_cost_sek: Number(item.estimated_replacement_cost_sek) || 0,
-            market_value_sek: Number(item.market_value_sek) || 0,
-            condition: item.condition || "Mycket gott",
-            serial_number_hint: item.serial_number_hint || "",
-            image_path: fileName,
-            photo_path: fileName,
-            image_paths: [fileName],
-            is_archived: false
-          }));
-
-          const { error: insertErr } = await supabase.from("items").insert(inserts);
-          if (!insertErr) {
-            await fetchVaultStats(userId, selectedProperty?.id);
-            await fetchVaultItems(userId, selectedProperty?.id);
-            showToast(`${inserts.length} föremål har sparats i ditt valv ✓`);
-          }
-        } else if (pending.result) {
-          const { data: insertedData, error: insertErr } = await supabase.from("items").insert({
-            user_id: userId,
-            property_id: selectedProperty?.id || null,
-            title: pending.result.title,
-            category: pending.result.category,
-            room: pending.room || "Vardagsrum",
-            brand: pending.result.brand,
-            model: pending.result.model,
-            estimated_replacement_cost_sek: pending.result.estimated_replacement_cost_sek,
-            market_value_sek: pending.result.market_value_sek,
-            condition: pending.result.condition,
-            serial_number_hint: pending.result.serial_number_hint,
-            image_path: fileName,
-            photo_path: fileName,
-            image_paths: [fileName],
-            is_archived: false
-          }).select().single();
-
-          if (!insertErr && insertedData) {
-            await fetchVaultStats(userId, selectedProperty?.id);
-            await fetchVaultItems(userId, selectedProperty?.id);
-            showToast(`"${pending.result.title}" har sparats i ditt valv ✓`);
-          }
-        }
+      if (!error && data) {
+        const total = data.reduce((sum, item) => sum + (Number(item.estimated_replacement_cost_sek) || 0), 0);
+        setTotalValuationSek(total);
       }
     } catch (e) {
-      console.error("Kunde inte synka gästdata:", e);
+      console.error("Kunde inte hämta statistik:", e);
     }
   };
 
-  useEffect(() => {
-    const initSession = async () => {
-      const { data } = await supabase.auth.getSession();
-      const user = data.session?.user || null;
-      setSessionUser(user);
-      if (user) {
-        const storedName = user.user_metadata?.display_name || user.user_metadata?.full_name || "";
-        setDisplayName(storedName);
-        setDisplayNameInput(storedName);
-        await fetchProperties(user.id);
-        await processPendingGuestData(user.id);
-      }
-    };
-    initSession();
-
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      const user = session?.user || null;
-      setSessionUser(user);
-      if (user) {
-        const storedName = user.user_metadata?.display_name || user.user_metadata?.full_name || "";
-        setDisplayName(storedName);
-        setDisplayNameInput(storedName);
-        await fetchProperties(user.id);
-        await processPendingGuestData(user.id);
-      } else {
-        setDisplayName("");
-        setDisplayNameInput("");
-        setTotalValuationSek(0);
-        setVaultItems([]);
-        setProperties([]);
-        setSelectedProperty(null);
-        setCurrentNav("home");
-      }
-    });
-
-    return () => authListener.subscription.unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    if (selectedProperty?.id) {
-      fetchPropertyMembers(selectedProperty.id);
-    }
-  }, [selectedProperty]);
-
-  const handleSaveDisplayName = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!sessionUser) return;
-    setIsUpdatingName(true);
-
+  const fetchVaultItems = async (userId: string, propertyId?: string) => {
     try {
-      const cleanName = displayNameInput.trim();
-      const { data, error } = await supabase.auth.updateUser({
-        data: { display_name: cleanName, full_name: cleanName }
-      });
+      let query = supabase.from("items").select("*").eq("user_id", userId).order("created_at", { ascending: false });
+      if (propertyId) query = query.eq("property_id", propertyId);
 
+      const { data, error } = await query;
       if (error) throw error;
 
-      if (data?.user) {
-        setSessionUser(data.user);
-        setDisplayName(cleanName);
-        showToast("Ditt namn har sparats ✓");
+      if (data) {
+        const itemsWithSignedUrls: VaultItem[] = await Promise.all(
+          data.map(async (item) => {
+            let rawPaths: string[] = [];
+            if (Array.isArray(item.image_paths) && item.image_paths.length > 0) {
+              rawPaths = item.image_paths;
+            } else if (item.image_path || item.photo_path) {
+              rawPaths = [item.image_path || item.photo_path];
+            }
+
+            const signedUrls: string[] = [];
+            for (const path of rawPaths) {
+              if (path) {
+                const { data: urlData } = await supabase.storage.from("item-photos").createSignedUrl(path, 3600);
+                if (urlData?.signedUrl) signedUrls.push(urlData.signedUrl);
+              }
+            }
+
+            let receiptSigned = "";
+            if (item.receipt_path) {
+              const { data: rUrlData } = await supabase.storage.from("item-photos").createSignedUrl(item.receipt_path, 3600);
+              receiptSigned = rUrlData?.signedUrl || "";
+            }
+
+            return { 
+              ...item, 
+              is_archived: Boolean(item.is_archived),
+              image_paths: rawPaths,
+              imageUrls: signedUrls,
+              imageUrl: signedUrls[0] || "",
+              receiptUrl: receiptSigned 
+            };
+          })
+        );
+        setVaultItems(itemsWithSignedUrls);
       }
     } catch (err: any) {
-      alert(`Kunde inte spara namn: ${err.message}`);
-    } finally {
-      setIsUpdatingName(false);
+      console.error("Kunde inte hämta valv:", err);
     }
   };
 
@@ -1038,67 +954,166 @@ export default function HomePage() {
     }
   };
 
-  const fetchVaultStats = async (userId: string, propertyId?: string) => {
-    try {
-      let query = supabase.from("items").select("estimated_replacement_cost_sek").eq("user_id", userId).eq("is_archived", false);
-      if (propertyId) query = query.eq("property_id", propertyId);
-      const { data, error } = await query;
+  const processPendingGuestData = async (userId: string) => {
+    const pendingJson = localStorage.getItem("bovalvet_pending_guest_item");
+    if (!pendingJson) return;
 
-      if (!error && data) {
-        const total = data.reduce((sum, item) => sum + (Number(item.estimated_replacement_cost_sek) || 0), 0);
-        setTotalValuationSek(total);
+    try {
+      const pending = JSON.parse(pendingJson);
+      localStorage.removeItem("bovalvet_pending_guest_item");
+
+      showToast("Sparar dina fotade föremål till ditt valv...");
+
+      if (pending.base64ForSave && (pending.result || (pending.multiResults && pending.multiResults.length > 0))) {
+        const byteCharacters = atob(pending.base64ForSave);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: "image/jpeg" });
+        const fileName = `${userId}/${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`;
+
+        await supabase.storage.from("item-photos").upload(fileName, blob, { 
+          contentType: "image/jpeg", 
+          upsert: true 
+        });
+
+        if (pending.multiResults && pending.multiResults.length > 0) {
+          const inserts = pending.multiResults.map((item: any) => ({
+            user_id: userId,
+            property_id: selectedProperty?.id || null,
+            title: item.title,
+            category: item.category,
+            room: pending.room || "Vardagsrum",
+            brand: item.brand || "",
+            model: item.model || "",
+            estimated_replacement_cost_sek: Number(item.estimated_replacement_cost_sek) || 0,
+            market_value_sek: Number(item.market_value_sek) || 0,
+            condition: item.condition || "Mycket gott",
+            serial_number_hint: item.serial_number_hint || "",
+            image_path: fileName,
+            photo_path: fileName,
+            image_paths: [fileName],
+            is_archived: false
+          }));
+
+          const { error: insertErr } = await supabase.from("items").insert(inserts);
+          if (!insertErr) {
+            await fetchVaultStats(userId, selectedProperty?.id);
+            await fetchVaultItems(userId, selectedProperty?.id);
+            showToast(`${inserts.length} föremål har sparats i ditt valv ✓`);
+          }
+        } else if (pending.result) {
+          const { data: insertedData, error: insertErr } = await supabase.from("items").insert({
+            user_id: userId,
+            property_id: selectedProperty?.id || null,
+            title: pending.result.title,
+            category: pending.result.category,
+            room: pending.room || "Vardagsrum",
+            brand: pending.result.brand,
+            model: pending.result.model,
+            estimated_replacement_cost_sek: pending.result.estimated_replacement_cost_sek,
+            market_value_sek: pending.result.market_value_sek,
+            condition: pending.result.condition,
+            serial_number_hint: pending.result.serial_number_hint,
+            image_path: fileName,
+            photo_path: fileName,
+            image_paths: [fileName],
+            is_archived: false
+          }).select().single();
+
+          if (!insertErr && insertedData) {
+            await fetchVaultStats(userId, selectedProperty?.id);
+            await fetchVaultItems(userId, selectedProperty?.id);
+            showToast(`"${pending.result.title}" har sparats i ditt valv ✓`);
+          }
+        }
       }
     } catch (e) {
-      console.error("Kunde inte hämta statistik:", e);
+      console.error("Kunde inte synka gästdata:", e);
     }
   };
 
-  const fetchVaultItems = async (userId: string, propertyId?: string) => {
-    try {
-      let query = supabase.from("items").select("*").eq("user_id", userId).order("created_at", { ascending: false });
-      if (propertyId) query = query.eq("property_id", propertyId);
+  useEffect(() => {
+    const initSession = async () => {
+      try {
+        if (!isSupabaseConfigured()) return;
+        const { data } = await supabase.auth.getSession();
+        const user = data.session?.user || null;
+        setSessionUser(user);
+        if (user) {
+          const storedName = user.user_metadata?.display_name || user.user_metadata?.full_name || "";
+          setDisplayName(storedName);
+          setDisplayNameInput(storedName);
+          await fetchProperties(user.id);
+          await processPendingGuestData(user.id);
+        }
+      } catch (err) {
+        console.warn("Kunde inte hämta Supabase-session:", err);
+      }
+    };
+    initSession();
 
-      const { data, error } = await query;
+    let authSubscription: { unsubscribe: () => void } | null = null;
+    try {
+      if (isSupabaseConfigured()) {
+        const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+          const user = session?.user || null;
+          setSessionUser(user);
+          if (user) {
+            const storedName = user.user_metadata?.display_name || user.user_metadata?.full_name || "";
+            setDisplayName(storedName);
+            setDisplayNameInput(storedName);
+            await fetchProperties(user.id);
+            await processPendingGuestData(user.id);
+          } else {
+            setDisplayName("");
+            setDisplayNameInput("");
+            setTotalValuationSek(0);
+            setVaultItems([]);
+            setProperties([]);
+            setSelectedProperty(null);
+            setCurrentNav("home");
+          }
+        });
+        authSubscription = authListener?.subscription || null;
+      }
+    } catch (e) {
+      console.warn("Kunde inte starta authListener:", e);
+    }
+
+    return () => {
+      authSubscription?.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (selectedProperty?.id) {
+      fetchPropertyMembers(selectedProperty.id);
+    }
+  }, [selectedProperty]);
+
+  const handleSaveDisplayName = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!sessionUser) return;
+    setIsUpdatingName(true);
+
+    try {
+      const cleanName = displayNameInput.trim();
+      const { data, error } = await supabase.auth.updateUser({
+        data: { display_name: cleanName, full_name: cleanName }
+      });
+
       if (error) throw error;
 
-      if (data) {
-        const itemsWithSignedUrls: VaultItem[] = await Promise.all(
-          data.map(async (item) => {
-            let rawPaths: string[] = [];
-            if (Array.isArray(item.image_paths) && item.image_paths.length > 0) {
-              rawPaths = item.image_paths;
-            } else if (item.image_path || item.photo_path) {
-              rawPaths = [item.image_path || item.photo_path];
-            }
-
-            const signedUrls: string[] = [];
-            for (const path of rawPaths) {
-              if (path) {
-                const { data: urlData } = await supabase.storage.from("item-photos").createSignedUrl(path, 3600);
-                if (urlData?.signedUrl) signedUrls.push(urlData.signedUrl);
-              }
-            }
-
-            let receiptSigned = "";
-            if (item.receipt_path) {
-              const { data: rUrlData } = await supabase.storage.from("item-photos").createSignedUrl(item.receipt_path, 3600);
-              receiptSigned = rUrlData?.signedUrl || "";
-            }
-
-            return { 
-              ...item, 
-              is_archived: Boolean(item.is_archived),
-              image_paths: rawPaths,
-              imageUrls: signedUrls,
-              imageUrl: signedUrls[0] || "",
-              receiptUrl: receiptSigned 
-            };
-          })
-        );
-        setVaultItems(itemsWithSignedUrls);
+      if (data?.user) {
+        setSessionUser(data.user);
+        setDisplayName(cleanName);
+        showToast("Ditt namn har sparats ✓");
       }
     } catch (err: any) {
-      console.error("Kunde inte hämta valv:", err);
+      alert(`Kunde inte spara namn: ${err.message}`);
+    } finally {
+      setIsUpdatingName(false);
     }
   };
 
@@ -1107,6 +1122,19 @@ export default function HomePage() {
     setIsDeleting(true);
 
     try {
+      if (!sessionUser || itemToDelete.id.startsWith("demo-") || itemToDelete.id.startsWith("local-")) {
+        const updated = vaultItems.filter((i) => i.id !== itemToDelete.id);
+        setVaultItems(updated);
+        const sum = updated.reduce((s, it) => s + (Number(it.estimated_replacement_cost_sek) || 0), 0);
+        setTotalValuationSek(sum);
+        localStorage.setItem("bovalvet_local_items", JSON.stringify(updated));
+        if (editingItem?.id === itemToDelete.id) setEditingItem(null);
+        setItemToDelete(null);
+        setIsDeleting(false);
+        showToast("Föremålet har raderats från ditt lokala valv");
+        return;
+      }
+
       await supabase.from("items").delete().eq("id", itemToDelete.id);
       
       const pathsToDelete = itemToDelete.image_paths && itemToDelete.image_paths.length > 0 
@@ -1134,8 +1162,19 @@ export default function HomePage() {
   };
 
   const handleArchiveItem = async () => {
-    if (!itemToArchive || !sessionUser) return;
+    if (!itemToArchive) return;
     try {
+      if (!sessionUser || itemToArchive.id.startsWith("demo-") || itemToArchive.id.startsWith("local-")) {
+        const updated = { ...itemToArchive, is_archived: true, archive_reason: archiveReasonInput };
+        const updatedItems = vaultItems.map((i) => (i.id === itemToArchive.id ? updated : i));
+        setVaultItems(updatedItems);
+        localStorage.setItem("bovalvet_local_items", JSON.stringify(updatedItems));
+        if (editingItem?.id === itemToArchive.id) setEditingItem(null);
+        setItemToArchive(null);
+        showToast(`Flyttad till arkivet (${archiveReasonInput}) ✓`);
+        return;
+      }
+
       await supabase
         .from("items")
         .update({
@@ -1156,8 +1195,16 @@ export default function HomePage() {
   };
 
   const handleRestoreItem = async (item: VaultItem) => {
-    if (!sessionUser) return;
     try {
+      if (!sessionUser || item.id.startsWith("demo-") || item.id.startsWith("local-")) {
+        const updated = { ...item, is_archived: false, archive_reason: undefined };
+        const updatedItems = vaultItems.map((i) => (i.id === item.id ? updated : i));
+        setVaultItems(updatedItems);
+        localStorage.setItem("bovalvet_local_items", JSON.stringify(updatedItems));
+        showToast(`"${item.title}" har återställts till valvet ✓`);
+        return;
+      }
+
       await supabase
         .from("items")
         .update({ is_archived: false, archive_reason: null })
@@ -1274,7 +1321,18 @@ export default function HomePage() {
   // PUNKT 3: SPARAR FÖREMÅL SAMT FLYTTAR MELLAN HEM OM PROPERTY_ID ÄNDRATS
   const handleSaveItemUpdates = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingItem || !sessionUser) return;
+    if (!editingItem) return;
+
+    if (!sessionUser || editingItem.id.startsWith("demo-") || editingItem.id.startsWith("local-")) {
+      const updated = vaultItems.map((i) => (i.id === editingItem.id ? { ...editingItem } : i));
+      setVaultItems(updated);
+      const sum = updated.reduce((s, it) => s + (Number(it.estimated_replacement_cost_sek) || 0), 0);
+      setTotalValuationSek(sum);
+      localStorage.setItem("bovalvet_local_items", JSON.stringify(updated));
+      setEditingItem(null);
+      showToast("Ändringarna sparades i ditt lokala valv ✓");
+      return;
+    }
 
     setIsUpdating(true);
     try {
@@ -1464,18 +1522,7 @@ export default function HomePage() {
 
       if (!navigator.onLine) {
         setIsAnalyzing(false);
-        setResult({
-          title: "Föremål (Sparat offline)",
-          category: "Övrigt hem & inredning",
-          brand: "",
-          model: "",
-          estimated_replacement_cost_sek: 1000,
-          market_value_sek: 500,
-          condition: "Mycket gott",
-          serial_number_hint: "",
-          confidence: 1
-        });
-        showToast("Offlineläge: Fyll i uppgifter manuellt och spara.");
+        alert("Ingen internetanslutning. Kontrollera din uppkoppling.");
         return;
       }
 
@@ -1548,18 +1595,9 @@ export default function HomePage() {
       }
     } catch (err: unknown) {
       setIsAnalyzing(false);
-      setResult({
-        title: "Föremål (Sparat offline)",
-        category: "Övrigt hem & inredning",
-        brand: "",
-        model: "",
-        estimated_replacement_cost_sek: 1000,
-        market_value_sek: 500,
-        condition: "Mycket gott",
-        serial_number_hint: "",
-        confidence: 1
-      });
-      showToast("Ingen anslutning. Sparad i offline-kö.");
+      setPreviewUrl(null);
+      setBase64ForSave(null);
+      alert(err instanceof Error ? err.message : "Kunde inte analysera bilden. Försök igen.");
     } finally {
       setIsAnalyzing(false);
     }
@@ -1569,6 +1607,12 @@ export default function HomePage() {
     if (!result || !base64ForSave) return;
 
     if (!userId) {
+      if (!isSupabaseConfigured()) {
+        setShowSupabaseConfigModal(true);
+        showToast("Koppla Supabase för att spara i molnvalvet!");
+        return;
+      }
+
       const guestData = {
         result,
         base64ForSave,
@@ -1637,6 +1681,12 @@ export default function HomePage() {
     if (itemsToSave.length === 0 || !base64ForSave || !previewUrl) return;
 
     if (!userId) {
+      if (!isSupabaseConfigured()) {
+        setShowSupabaseConfigModal(true);
+        showToast("Koppla Supabase för att spara i molnvalvet!");
+        return;
+      }
+
       const guestData = {
         multiResults: itemsToSave,
         base64ForSave,
@@ -1648,8 +1698,8 @@ export default function HomePage() {
       return;
     }
 
-    setIsSaving(true);
     const totalAdded = itemsToSave.reduce((sum, item) => sum + (Number(item.estimated_replacement_cost_sek) || 0), 0);
+    setIsSaving(true);
 
     try {
       const byteCharacters = atob(base64ForSave);
@@ -1756,11 +1806,18 @@ export default function HomePage() {
 
   const handleSaveManualItem = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!manualFormData.title) return;
+
     if (!sessionUser) {
+      if (!isSupabaseConfigured()) {
+        setShowSupabaseConfigModal(true);
+        showToast("Koppla Supabase för att spara föremål i valvet!");
+        return;
+      }
       setShowAuthModal(true);
+      showToast("Logga in för att spara föremål i ditt valv!");
       return;
     }
-    if (!manualFormData.title) return;
 
     setIsSavingManual(true);
     try {
@@ -1977,13 +2034,6 @@ export default function HomePage() {
     <div className="min-h-screen bg-[var(--color-bg)] md:bg-[#ECE4D8] text-[var(--color-text)] flex justify-center selection:bg-[var(--color-primary-soft)] selection:text-[var(--color-primary)]">
       <div className="w-full max-w-[480px] min-h-screen flex flex-col relative pb-32 bg-[var(--color-bg)] md:shadow-md md:border-x md:border-[var(--color-border)]">
 
-        {!isOnline && (
-          <div className="bg-amber-600 text-white text-xs font-bold px-4 py-2 text-center flex items-center justify-center gap-2 z-30">
-            <WifiOff className="w-4 h-4" />
-            <span>Offlineläge aktivt ({offlineQueue.length} i kö)</span>
-          </div>
-        )}
-
         {!showRoomPickerScreen && !isAnalyzing && !result && multiResults.length === 0 && !editingItem && !showArchiveHub && (
           <header className="h-16 px-5 flex items-center justify-between z-20">
             <div className="flex items-center gap-2.5">
@@ -2004,6 +2054,20 @@ export default function HomePage() {
 
             <div className="flex items-center gap-2">
               <button
+                type="button"
+                onClick={() => setShowSupabaseConfigModal(true)}
+                className={`min-h-[36px] px-2.5 py-1 rounded-full text-xs font-bold border transition flex items-center gap-1.5 ${
+                  isSupabaseConnectedState 
+                    ? "bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100" 
+                    : "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100"
+                }`}
+                title="Databas & Molnsynkning (Supabase)"
+              >
+                <span className={`w-2 h-2 rounded-full ${isSupabaseConnectedState ? "bg-emerald-500 animate-pulse" : "bg-amber-500"}`} />
+                <span>{isSupabaseConnectedState ? (sessionUser ? "Molnsynk på" : "Moln redo") : "Gästläge"}</span>
+              </button>
+
+              <button
                 onClick={() => {
                   if (!sessionUser) {
                     setShowAuthModal(true);
@@ -2021,19 +2085,19 @@ export default function HomePage() {
           </header>
         )}
 
-        <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleImageSelected} className="hidden" />
-        <input ref={galleryInputRef} type="file" accept="image/*" onChange={handleImageSelected} className="hidden" />
-        <input ref={receiptInputRef} type="file" accept="image/*" onChange={handleReceiptUpload} className="hidden" />
-        <input ref={wizardReceiptInputRef} type="file" accept="image/*" capture="environment" onChange={handleWizardReceiptUpload} className="hidden" />
+        <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleImageSelected} className="hidden" style={{ display: "none" }} />
+        <input ref={galleryInputRef} type="file" accept="image/*" onChange={handleImageSelected} className="hidden" style={{ display: "none" }} />
+        <input ref={receiptInputRef} type="file" accept="image/*" onChange={handleReceiptUpload} className="hidden" style={{ display: "none" }} />
+        <input ref={wizardReceiptInputRef} type="file" accept="image/*" capture="environment" onChange={handleWizardReceiptUpload} className="hidden" style={{ display: "none" }} />
         <input ref={manualPhotoInputRef} type="file" accept="image/*" onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) {
             setManualPhotoFile(f);
             setManualPhotoPreview(URL.createObjectURL(f));
           }
-        }} className="hidden" />
-        <input ref={editItemCameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleUploadAdditionalPhoto} className="hidden" />
-        <input ref={editItemGalleryInputRef} type="file" accept="image/*" onChange={handleUploadAdditionalPhoto} className="hidden" />
+        }} className="hidden" style={{ display: "none" }} />
+        <input ref={editItemCameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleUploadAdditionalPhoto} className="hidden" style={{ display: "none" }} />
+        <input ref={editItemGalleryInputRef} type="file" accept="image/*" onChange={handleUploadAdditionalPhoto} className="hidden" style={{ display: "none" }} />
 
         <main className="flex-1 px-5 pt-1 space-y-6 overflow-y-auto">
 
@@ -2558,6 +2622,33 @@ export default function HomePage() {
             <div className="space-y-6 animate-in fade-in">
               {activeVaultItems.length === 0 ? (
                 <div className="space-y-5 pt-2">
+                  {!isSupabaseConnectedState && (
+                    <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-100 rounded-3xl border-2 border-emerald-600/40 p-5 shadow-sm space-y-3">
+                      <div className="flex items-start gap-3.5">
+                        <div className="w-10 h-10 rounded-2xl bg-emerald-700 text-white flex items-center justify-center shrink-0 shadow-xs">
+                          <Database className="w-5 h-5" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-base font-extrabold text-emerald-950">Anslut till ditt Supabase-moln</h3>
+                            <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-200 text-emerald-900 border border-emerald-300">Skarp app</span>
+                          </div>
+                          <p className="text-sm text-emerald-900/85 mt-1 leading-relaxed">
+                            För att logga in med konto och spara föremål och foton i molnet behöver du ange din Supabase URL och Anon Key.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowSupabaseConfigModal(true)}
+                        className="min-h-[46px] w-full rounded-2xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-xs transition active:scale-[.98]"
+                      >
+                        <Database className="w-4 h-4" />
+                        <span>Fyll i Supabase URL & Anon Key</span>
+                      </button>
+                    </div>
+                  )}
+
                   <div>
                     <h1 className="text-[28px] font-extrabold text-[var(--color-text)] leading-tight">
                       Välkommen till BoValvet!
@@ -2588,6 +2679,25 @@ export default function HomePage() {
                       <Camera className="w-5 h-5" />
                       <span>Fota ditt första föremål</span>
                     </button>
+
+                    <div className="pt-2 flex flex-col gap-2">
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setManualFormData({
+                            room: activeRoom,
+                            category: "Möbler & Inredning",
+                            condition: "Mycket gott",
+                          });
+                          setShowManualModal(true);
+                        }}
+                        className="min-h-[40px] w-full text-[var(--color-text-soft)] font-semibold text-sm hover:underline flex items-center justify-center gap-1.5"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>Lägg till föremål manuellt</span>
+                      </button>
+                    </div>
                   </div>
 
                   <div className="p-5 bg-[var(--color-primary-soft)] rounded-3xl border border-[var(--color-border)] space-y-3">
@@ -3109,6 +3219,39 @@ export default function HomePage() {
                       </p>
                     </div>
                   )}
+                </div>
+
+                {/* DATABAS & SYNKLÄGE */}
+                <div className="bg-[var(--color-surface)] rounded-3xl border border-[var(--color-border)] p-5 shadow-card space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-[var(--color-primary-soft)] text-[var(--color-primary)] flex items-center justify-center flex-shrink-0">
+                        <Database className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <b className="text-[17px] text-[var(--color-text)] block">Databas & Molnsynk</b>
+                        <span className="text-[14px] text-[var(--color-text-soft)]">
+                          {isSupabaseConnectedState ? "Supabase är anslutet (Molnsäkerhet)" : "Supabase ej konfigurerat"}
+                        </span>
+                      </div>
+                    </div>
+                    <span className={`w-3 h-3 rounded-full ${isSupabaseConnectedState ? "bg-emerald-500" : "bg-rose-500"}`} />
+                  </div>
+
+                  <p className="text-sm text-[var(--color-text-soft)] leading-relaxed">
+                    BoValvet använder Supabase för användarhantering, realtidsdatabas och krypterad bildlagring i molnet.
+                  </p>
+
+                  <div className="flex flex-col gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowSupabaseConfigModal(true)}
+                      className="min-h-[46px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-sm flex items-center justify-center gap-2 shadow-xs transition active:scale-[.98]"
+                    >
+                      <Database className="w-4 h-4" />
+                      <span>{isSupabaseConnectedState ? "Hantera Supabase-inställningar" : "Koppla Supabase (URL & Nyckel)"}</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -4692,9 +4835,23 @@ export default function HomePage() {
         )}
 
         {showAuthModal && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-            <div className="bg-[var(--color-surface)] rounded-3xl p-6 w-full max-w-sm border border-[var(--color-border)] space-y-4 shadow-xl">
-              <div className="text-center space-y-1">
+          <div 
+            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in"
+            onClick={() => setShowAuthModal(false)}
+          >
+            <div 
+              className="bg-[var(--color-surface)] rounded-3xl p-6 w-full max-w-sm border border-[var(--color-border)] space-y-4 shadow-xl relative animate-in zoom-in-95"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                onClick={() => setShowAuthModal(false)}
+                className="absolute top-4 right-4 w-8 h-8 rounded-full flex items-center justify-center text-[var(--color-text-soft)] hover:bg-[var(--color-bg)] transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="text-center space-y-1 pt-1">
                 <div className="w-12 h-12 rounded-2xl bg-[var(--color-primary-soft)] text-[var(--color-primary)] flex items-center justify-center mx-auto font-black text-lg">
                   BV
                 </div>
@@ -4705,6 +4862,37 @@ export default function HomePage() {
                   Dina inventarier krypteras och sparas tryggt i ditt valv.
                 </p>
               </div>
+
+              {!isSupabaseConnectedState && (
+                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 space-y-2 text-xs text-amber-900">
+                  <div className="font-bold flex items-center gap-1.5 text-amber-950">
+                    <Database className="w-4 h-4 text-amber-700 flex-shrink-0" />
+                    <span>Supabase-moln är inte anslutet</span>
+                  </div>
+                  <p className="leading-relaxed text-[11.5px]">
+                    Du kan fortsätta använda BoValvet helt lokalt i webbläsaren, eller koppla din Supabase-databas med din URL och Anon Key.
+                  </p>
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAuthModal(false);
+                        setShowSupabaseConfigModal(true);
+                      }}
+                      className="flex-1 py-1.5 px-2 bg-amber-700 text-white font-bold rounded-lg text-center hover:bg-amber-800 transition"
+                    >
+                      Koppla Supabase
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowAuthModal(false)}
+                      className="flex-1 py-1.5 px-2 bg-white border border-amber-300 font-bold rounded-lg text-center hover:bg-amber-100 transition"
+                    >
+                      Fortsätt lokalt
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {authError && (
                 <div className="bg-rose-50 text-rose-800 p-2.5 rounded-xl text-sm">
@@ -4791,6 +4979,96 @@ export default function HomePage() {
                   {authIsSignUp ? "Har du redan ett konto? Logga in" : "Inget konto? Skapa ett"}
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* SUPABASE-KONFIGURATION MODAL */}
+        {showSupabaseConfigModal && (
+          <div 
+            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in"
+            onClick={() => setShowSupabaseConfigModal(false)}
+          >
+            <div 
+              className="bg-[var(--color-surface)] rounded-3xl p-6 w-full max-w-md border border-[var(--color-border)] space-y-4 shadow-2xl animate-in zoom-in-95"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
+                    <Database className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-[var(--color-text)] leading-tight">
+                      Supabase Molndatabas
+                    </h3>
+                    <span className="text-xs text-[var(--color-text-soft)]">
+                      {isSupabaseConnectedState ? "🟢 Ansluten till Supabase" : "🔴 Ej konfigurerad"}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowSupabaseConfigModal(false)}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-[var(--color-text-soft)] hover:bg-[var(--color-bg)] transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <p className="text-sm text-[var(--color-text-soft)] leading-relaxed">
+                BoValvet sparar alla inventarier, kvitton och foton i ditt skarpa Supabase-moln. Ange dina projektuppgifter nedan så sparas de direkt i din <code className="bg-[var(--color-bg)] px-1.5 py-0.5 rounded text-xs font-mono">.env.local</code> och i appen.
+              </p>
+
+              <form onSubmit={handleSaveSupabaseConfig} className="space-y-3.5 pt-1">
+                <div>
+                  <label className="text-xs font-bold text-[var(--color-text-soft)] block mb-1">
+                    SUPABASE PROJECT URL
+                  </label>
+                  <input
+                    type="url"
+                    required
+                    placeholder="https://xyzcompany.supabase.co"
+                    value={supabaseUrlInput}
+                    onChange={(e) => setSupabaseUrlInput(e.target.value)}
+                    className="w-full min-h-[46px] px-3.5 border border-[var(--color-border)] rounded-xl text-sm bg-[var(--color-surface)] font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-[var(--color-text-soft)] block mb-1">
+                    SUPABASE ANON PUBLIC KEY
+                  </label>
+                  <textarea
+                    rows={3}
+                    required
+                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    value={supabaseKeyInput}
+                    onChange={(e) => setSupabaseKeyInput(e.target.value)}
+                    className="w-full p-3 border border-[var(--color-border)] rounded-xl text-xs bg-[var(--color-surface)] font-mono resize-none leading-relaxed"
+                  />
+                </div>
+
+                <div className="pt-2 flex flex-col gap-2">
+                  <button
+                    type="submit"
+                    className="min-h-[48px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-bold text-sm flex items-center justify-center gap-2 shadow-xs transition active:scale-[.98]"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>Spara och anslut till Supabase</span>
+                  </button>
+
+                  {isSupabaseConnectedState && (
+                    <button
+                      type="button"
+                      onClick={handleClearSupabaseConfig}
+                      className="min-h-[38px] w-full text-rose-600 font-semibold text-xs hover:underline text-center"
+                    >
+                      Koppla från Supabase
+                    </button>
+                  )}
+                </div>
+              </form>
             </div>
           </div>
         )}
