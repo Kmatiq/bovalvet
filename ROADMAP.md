@@ -20,6 +20,7 @@ Denna fil fungerar som projektets permanenta minne och handlingsplan. Den uppdat
   - Sekundära tekniska fält samlade i utfällbart dragspel ("Fler uppgifter (valfritt)") med indikatorn "Ifyllt".
   - Borttagning av förbjuden `text-xs` till förmån för tydlig `text-sm` (14 px) och `text-base` (16 px).
   - Centraliserad `openEditItem`-funktion för konsekvent beteende.
+- [x] **Samordning AI Studio → GitHub (2026-11-17):** GitHub är nu enda källan. AI Studio-versionen sparad på grenen `aistudio-backup`. Offlineläget borttaget (inga påhittade "Sparat offline"-föremål längre), knappen "Lägg till föremål manuellt" tillagd i välkomstvyn. Se `DOKUMENTATION.md`.
 
 ---
 
@@ -31,9 +32,9 @@ Denna fil fungerar som projektets permanenta minne och handlingsplan. Den uppdat
 - **Delmoment:**
   - [x] **"Less is more"-filosofi spikad:** Endast *Benämning*, *Värde* och *Rum* i fokus för användaren. Sekundära tekniska detaljer sparas i bakgrunden utan att störa.
   - [ ] **Skrota plottrigt "Point-and-Pick":** Ta bort små klickytor och siffror på fotot. Istället visas en ren, stor och lugn lista med föremålen AI:n hittat och hemmets nya delsumma.
-  - [ ] **1-klicks-sparande ("Spara alla X föremål"):** Möjlighet att med ett enda tryck spara alla hittade föremål direkt till det valda rummet.
-  - [ ] **Enkelt stryk-val (`✕ Ta bort`):** Ett enda klick på ett föremålskort för att ta bort det om AI:n råkade ta med något man inte vill spara.
-  - [ ] **Lugnt "Ett i taget"-stegningsläge (1 av X):** För användare som vill granska föremålen noggrant ett i taget med stor bild, titel och pris innan de sparas.
+  - [x] **1-klicks-sparande ("Spara alla X föremål"):** Möjlighet att med ett enda tryck spara alla hittade föremål direkt till det valda rummet.
+  - [x] **Enkelt stryk-val (`✕ Ta bort`):** Ett enda klick på ett föremålskort för att ta bort det om AI:n råkade ta med något man inte vill spara.
+  - [x] **Lugnt "Ett i taget"-stegningsläge (1 av X):** För användare som vill granska föremålen noggrant ett i taget med stor bild, titel och pris innan de sparas.
   - [ ] **Smart och skarp beskärning (crop):** Säkerställa att närbilder beskärs snyggt utan kapade kanter, och att även gästanvändare som sparar och loggar in får sina närbilder sparade.
 
 
@@ -41,9 +42,9 @@ Denna fil fungerar som projektets permanenta minne och handlingsplan. Den uppdat
 
 ### 📍 Steg 2: UX- & Flödesförenkling för Hemägare (Snabbhet, Tydlighet & Förtroende)
 *Fokus: Enkelhet och belöning vid inventering så att användaren snabbt ser värdet av sitt hem.*
-- **Status:** ⏳ Ej påbörjad
+- **Status:** 🟡 Pågående
 - **Delmoment:**
-  - [ ] **Direkt feedback vid sparat föremål:** Visa en tydlig bekräftelse på hur hemmets totalvärde ökar (t.ex. *"+14 900 kr tillagt i Vardagsrummet!"*) och ge snabbval: *"Fota nästa föremål i rummet"* eller *"Se rummet"*.
+  - [x] **Direkt feedback vid sparat föremål:** Visa en tydlig bekräftelse på hur hemmets totalvärde ökar (t.ex. *"+14 900 kr tillagt i Vardagsrummet!"*) och ge snabbval: *"Fota nästa föremål i rummet"* eller *"Se rummet"*.
   - [ ] **Enhetlig DESIGN.md på alla modaler:** Gå igenom manuell inläggning, kvittoinläsning och rumsval så att alla följer reglerna för 52px-knappar, 14px-etiketter och helskärm/bottensheets.
   - [ ] **"Nästa steg"-rumsguide:** Förbättra den visuella guiden för heminventering som visar vilka rum som är klara och vilka som saknar inventarier, vilket gör inventeringen lustfylld och stegvis.
 
@@ -51,16 +52,17 @@ Denna fil fungerar som projektets permanenta minne och handlingsplan. Den uppdat
 
 ### 📍 Steg 3: Skade- & Värdesäkring (Försäkringsunderlag, Garantivakt & Export)
 *Fokus: Förvandla inventeringen till ett juridiskt och ekonomiskt skydd vid kris.*
-- **Status:** ⏳ Ej påbörjad
+- **Status:** 🟡 Pågående
 - **Delmoment:**
-  - [ ] **Händelsebaserat Skadepaket:** Göra det möjligt att filtrera/markera specifika skadade föremål (t.ex. "Vattenskada Kök" eller "Inbrott Hall") och generera ett färdigt skadeståndspaket direkt till försäkringsbolagets skadereglerare.
+  - [x] **Händelsebaserat Skadepaket:** Göra det möjligt att filtrera/markera specifika skadade föremål (t.ex. "Vattenskada Kök" eller "Inbrott Hall") och generera ett färdigt skadeståndspaket direkt till försäkringsbolagets skadereglerare.
   - [ ] **Garantivakt med svensk konsumenträtt:** Tydlig visuell tidslinje (lagstadgad reklamationsrätt 3 år vs tillverkargaranti) med färgkodade påminnelser när reklamationstiden närmar sig sitt slut.
   - [ ] **Förhandsgranskning i Exportcentret:** Möjlighet att snabbt granska totalsummor och rumsfördelning innan PDF-rapporten eller kalkylarket laddas ned.
 
 ---
 
 ## 📋 Rutin för sessioner
-1. **Vid sessionsstart:** Läs alltid av `ROADMAP.md` för att direkt veta var vi befinner oss.
+1. **Vid sessionsstart:** Läs alltid av `ROADMAP.md` (och vid behov `DOKUMENTATION.md`) för att direkt veta var vi befinner oss.
 2. **Under utveckling:** Bocka av delmoment när de är färdigställda och verifierade med `npm run build`.
 3. **Vid avslut/commit:** Se till att `ROADMAP.md` speglar det aktuella läget.
+4. **Endast GitHub:** Ingen utveckling i AI Studio. Allt arbete sker mot `Kmatiq/bovalvet`.
 
