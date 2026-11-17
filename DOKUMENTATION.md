@@ -33,7 +33,7 @@ Baserat på faktisk genomgång av koden (`app/page.tsx`, `app/api/*`, `lib/*`) f
 * **Filtrering:** AI:n och klienten filtrerar automatiskt bort byggnader, kollektivtrafik och orimliga värden (> 10 Mkr).
 
 ### B. Multi-föremålsflöde & Bekräftelse
-* **Översiktsvy:** Visar det analyserade fotot med interaktiva numrerade rutor/pins, lista över hittade föremål, sammanlagt nypris och möjlighet att ta bort enstaka felträffar (`X`).
+* **Översiktsvy:** Visar det tagna fotot (utan rutor eller siffror), en lugn lista med stora föremålskort, sammanlagt nypris, hemmets värde efter sparande och möjlighet att ta bort enstaka felträffar (`✕`).
 * **Två sparvägar:**
   1. **Steg-för-steg-genomgång ("1 av X"):** Gå igenom ett föremål i taget med stor beskuren bild, redigera namn/värde, fota kvitto direkt och klicka dig vidare.
   2. **1-klickssparande:** *"Spara alla X direkt som de är"*.
@@ -147,7 +147,7 @@ Jämförelse mellan dokumentet `ROADMAP.md` och vad som **faktiskt** är byggt i
 * [x] **Manuell inläggning från startsidan:** Knappen "Lägg till föremål manuellt" i välkomstvyn.
 
 ### 🟡 Pågående / Delvis kvar enligt `ROADMAP.md`
-* [ ] **Skrota plottrigt "Point-and-Pick":** I översiktsvyn för multiföremål (sök efter `Klicka på en siffra eller rad för att granska` i `app/page.tsx`) ritas fortfarande klickbara boxar och små numrerade cirklar ovanpå översiktsfotot (`Klicka på en siffra eller rad för att granska`), trots att `ROADMAP.md` anger att detta ska ersättas av en helt ren och lugn lista.
+* [x] **Skrota plottrigt "Point-and-Pick":** Klart 2026-11-17. Översiktsfotot visas utan rutor och siffror; i stället en lugn lista med stora föremålskort (närbild, namn, pris, ✕), sammanlagt nypris och hemmets värde efter sparande. Huvudknappen är nu "Spara alla X föremål" och "Granska ett i taget" är alternativet.
 * [ ] **Enhetlig `DESIGN.md`-efterlevnad på alla modaler:** Flera modaler är fortfarande centrerade kort (`items-center justify-center`) i stället för helskärm/bottensheets, och det finns fortfarande ~53 förekomster av `text-xs` / `text-[10px]`–`text-[12px]` (plus 7 st `text-[13px]`) kvar i `app/page.tsx` (trots att `globals.css` har ett nödnät med `!important` som tvingar upp `.text-xs` till `14px`).
 * [ ] **"Nästa steg"-rumsguide & Tidslinje för garantivakt:** Försäkrings- och garantivyn har trafikljusstatus, men en mer visuell steg-för-steg-rumsguide och tidslinje mellan 3 års reklamationsrätt och tillverkargaranti kan förfinas.
 * [ ] **Förhandsgranskning i Exportcentret:** Tydligare förhandsvisning av totalsummor/rum innan nedladdning.
@@ -221,6 +221,5 @@ Dessa regler måste alltid följas vid fortsatt utveckling av BoValvet:
    * Ta ställning till grenen `Deep-Code`.
    * Migrera `analyze-receipt` och `generate-listing` till `@google/genai` och ta bort `@google/generative-ai`.
 3. **Färdigställ `ROADMAP.md`-detaljer:**
-   * Ta bort den numrerade pin-overlayen i multiföremålsvyn om listan ska vara helt ren ("Less is more").
    * Slutför eller dölj `property_members`-inbjudningar tills RLS-policyn i Supabase är testad.
    * Åtgärda ESLint-felen så `npm run lint` går igenom utan fel.

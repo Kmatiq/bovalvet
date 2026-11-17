@@ -31,7 +31,7 @@ Denna fil fungerar som projektets permanenta minne och handlingsplan. Den uppdat
 - **Status:** 🟡 Pågående
 - **Delmoment:**
   - [x] **"Less is more"-filosofi spikad:** Endast *Benämning*, *Värde* och *Rum* i fokus för användaren. Sekundära tekniska detaljer sparas i bakgrunden utan att störa.
-  - [ ] **Skrota plottrigt "Point-and-Pick":** Ta bort små klickytor och siffror på fotot. Istället visas en ren, stor och lugn lista med föremålen AI:n hittat och hemmets nya delsumma.
+  - [x] **Skrota plottrigt "Point-and-Pick":** Ta bort små klickytor och siffror på fotot. Istället visas en ren, stor och lugn lista med föremålen AI:n hittat och hemmets nya delsumma. *(Klart 2026-11-17: fotot visas utan rutor/siffror, stora föremålskort med ✕, sammanlagt nypris + hemmets värde efter sparande, "Spara alla X föremål" som huvudknapp och "Granska ett i taget" som alternativ.)*
   - [x] **1-klicks-sparande ("Spara alla X föremål"):** Möjlighet att med ett enda tryck spara alla hittade föremål direkt till det valda rummet.
   - [x] **Enkelt stryk-val (`✕ Ta bort`):** Ett enda klick på ett föremålskort för att ta bort det om AI:n råkade ta med något man inte vill spara.
   - [x] **Lugnt "Ett i taget"-stegningsläge (1 av X):** För användare som vill granska föremålen noggrant ett i taget med stor bild, titel och pris innan de sparas.

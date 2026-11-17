@@ -418,7 +418,6 @@ export default function HomePage() {
   const [result, setResult] = useState<ItemAnalysisResult | null>(null);
   const [multiResults, setMultiResults] = useState<ItemAnalysisResult[]>([]);
   const [multiReviewStep, setMultiReviewStep] = useState<number | null>(null);
-  const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
 
   const [savedSuccessInfo, setSavedSuccessInfo] = useState<{
     count: number;
@@ -1379,7 +1378,6 @@ export default function HomePage() {
     setResult(null);
     setMultiResults([]);
     setMultiReviewStep(null);
-    setHighlightedIndex(null);
 
     setIsAnalyzing(true);
     setScanMessageIndex(0);
@@ -2100,9 +2098,9 @@ export default function HomePage() {
                 <button
                   type="button"
                   onClick={() => setShowRoomPickerScreen(true)}
-                  className="min-h-[40px] px-3.5 rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)] font-semibold text-sm flex items-center gap-1.5 hover:opacity-90 transition active:scale-95"
+                  className="min-h-[44px] px-3.5 rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)] font-semibold text-sm flex items-center gap-1.5 hover:opacity-90 transition active:scale-95"
                 >
-                  <MapPin className="w-3.5 h-3.5" />
+                  <MapPin className="w-4 h-4" />
                   <span>Rum: <strong>{activeRoom}</strong></span>
                 </button>
               </div>
@@ -2111,121 +2109,98 @@ export default function HomePage() {
                 <h1 className="text-[22px] font-extrabold text-[var(--color-text)]">
                   Hittade {multiResults.length} föremål i {activeRoom}
                 </h1>
-                <p className="text-sm text-[var(--color-text-soft)] mt-0.5">
-                  Sammanlagt nypris: <strong className="text-[var(--color-text)] font-extrabold">{multiResults.reduce((sum, item) => sum + (Number(item.estimated_replacement_cost_sek) || 0), 0).toLocaleString("sv-SE")} kr</strong>
+                <p className="text-base text-[var(--color-text-soft)] mt-1">
+                  Stämmer listan? Tryck på <strong className="text-[var(--color-text)]">✕</strong> för att ta bort det du inte vill spara.
                 </p>
               </div>
 
               {previewUrl && (
-                <div className="relative rounded-3xl overflow-hidden bg-black border border-[var(--color-border)] shadow-md select-none">
+                <div className="rounded-3xl overflow-hidden bg-[var(--color-surface)] border border-[var(--color-border)] shadow-xs select-none">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={previewUrl} alt="Översiktsfoto" className="w-full h-auto max-h-[300px] object-contain block mx-auto opacity-95" />
-                  
-                  {multiResults.map((item, idx) => {
-                    if (!item.box_2d || item.box_2d.length < 4) return null;
-                    const [ymin, xmin, ymax, xmax] = item.box_2d;
-                    const isHighlighted = highlightedIndex === idx;
-
-                    return (
-                      <div
-                        key={idx}
-                        onClick={() => setMultiReviewStep(idx)}
-                        style={{
-                          top: `${(ymin / 1000) * 100}%`,
-                          left: `${(xmin / 1000) * 100}%`,
-                          width: `${Math.max(10, ((xmax - xmin) / 1000) * 100)}%`,
-                          height: `${Math.max(8, ((ymax - ymin) / 1000) * 100)}%`,
-                        }}
-                        className={`absolute border-2 rounded-xl cursor-pointer transition-all duration-200 flex items-start justify-start p-1 ${
-                          isHighlighted 
-                            ? "border-[var(--color-primary)] bg-[var(--color-primary)]/35 ring-4 ring-white" 
-                            : "border-white/80 bg-black/25 hover:border-[var(--color-primary)] hover:bg-black/40"
-                        }`}
-                        title={item.title}
-                      >
-                        <span className="w-6 h-6 rounded-full bg-[var(--color-primary)] text-white text-xs font-black flex items-center justify-center shadow-lg border border-white">
-                          {idx + 1}
-                        </span>
-                      </div>
-                    );
-                  })}
-                  
-                  <div className="absolute bottom-2.5 right-2.5 bg-black/70 backdrop-blur-md px-3 py-1 rounded-full text-xs font-semibold text-white pointer-events-none">
-                    Klicka på en siffra eller rad för att granska
-                  </div>
+                  <img src={previewUrl} alt="Ditt foto" className="w-full h-auto max-h-[220px] object-contain block mx-auto" />
                 </div>
               )}
 
-              <div className="space-y-2 pt-1">
-                {multiResults.map((item, idx) => {
-                  const isHighlighted = highlightedIndex === idx;
-                  return (
-                    <div 
-                      key={idx}
-                      onMouseEnter={() => setHighlightedIndex(idx)}
-                      onMouseLeave={() => setHighlightedIndex(null)}
-                      className={`p-3 rounded-2xl border transition flex items-center justify-between gap-3 ${
-                        isHighlighted 
-                          ? "bg-[var(--color-primary-soft)] border-[var(--color-primary)] shadow-card" 
-                          : "bg-[var(--color-surface)] border-[var(--color-border)] shadow-xs"
-                      }`}
+              <ul className="space-y-3">
+                {multiResults.map((item, idx) => (
+                  <li
+                    key={idx}
+                    className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-xs flex items-center gap-2 pr-2"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setMultiReviewStep(idx)}
+                      className="min-h-[88px] flex items-center gap-4 min-w-0 flex-1 p-3 text-left rounded-2xl active:scale-[.99] transition"
+                      aria-label={`Granska ${item.title}`}
                     >
-                      <div 
-                        onClick={() => setMultiReviewStep(idx)}
-                        className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer"
-                      >
-                        <div className="w-7 h-7 rounded-full bg-[var(--color-primary)] text-white font-black text-xs flex items-center justify-center flex-shrink-0 shadow-xs">
-                          {idx + 1}
-                        </div>
-
-                        <div className="w-12 h-12 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border)] overflow-hidden flex-shrink-0 flex items-center justify-center">
-                          {item.previewCropUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={item.previewCropUrl} alt={item.title} className="w-full h-full object-cover" />
-                          ) : (
-                            <span className="text-xl">{getRoomEmoji(activeRoom)}</span>
-                          )}
-                        </div>
-
-                        <div className="min-w-0 flex-1">
-                          <b className="text-base text-[var(--color-text)] block truncate">{item.title}</b>
-                          <span className="text-sm font-extrabold text-[var(--color-text)] block">
-                            {Number(item.estimated_replacement_cost_sek).toLocaleString("sv-SE")} kr
-                          </span>
-                        </div>
+                      <div className="w-16 h-16 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border)] overflow-hidden flex-shrink-0 flex items-center justify-center">
+                        {item.previewCropUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={item.previewCropUrl} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <span className="text-2xl">{getRoomEmoji(activeRoom)}</span>
+                        )}
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => removeMultiItem(idx)}
-                        className="w-10 h-10 rounded-xl flex items-center justify-center text-[var(--color-text-soft)] hover:text-rose-600 hover:bg-rose-50 transition active:scale-95 flex-shrink-0"
-                        title="Ta bort föremål"
-                        aria-label={`Ta bort ${item.title}`}
-                      >
-                        <X className="w-5 h-5" />
-                      </button>
-                    </div>
-                  );
-                })}
+                      <div className="min-w-0 flex-1">
+                        <b className="text-base text-[var(--color-text)] block leading-snug line-clamp-2">{item.title}</b>
+                        <span className="text-base font-extrabold text-[var(--color-text)] block mt-0.5">
+                          {Number(item.estimated_replacement_cost_sek).toLocaleString("sv-SE")} kr
+                        </span>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => removeMultiItem(idx)}
+                      className="w-12 h-12 rounded-xl flex items-center justify-center text-[var(--color-text-soft)] hover:text-rose-600 hover:bg-rose-50 transition active:scale-95 flex-shrink-0"
+                      aria-label={`Ta bort ${item.title}`}
+                    >
+                      <X className="w-6 h-6" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+
+              <div className="rounded-2xl bg-[var(--color-primary-soft)] border border-[var(--color-border)] p-4 space-y-1.5">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="text-base text-[var(--color-text)]">Sammanlagt nypris</span>
+                  <strong className="text-lg font-extrabold text-[var(--color-text)]">
+                    {multiResults.reduce((sum, item) => sum + (Number(item.estimated_replacement_cost_sek) || 0), 0).toLocaleString("sv-SE")} kr
+                  </strong>
+                </div>
+                {sessionUser && (
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-sm text-[var(--color-text-soft)]">Hemmets värde efter sparande</span>
+                    <span className="text-sm font-bold text-[var(--color-primary)]">
+                      {(totalValuationSek + multiResults.reduce((sum, item) => sum + (Number(item.estimated_replacement_cost_sek) || 0), 0)).toLocaleString("sv-SE")} kr
+                    </span>
+                  </div>
+                )}
               </div>
 
-              <div className="pt-2 space-y-2.5">
-                <button
-                  type="button"
-                  onClick={() => setMultiReviewStep(0)}
-                  className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-extrabold text-base flex items-center justify-center gap-2.5 shadow-md active:scale-[.98] transition"
-                >
-                  <span>Gå igenom föremålen steg för steg (1 av {multiResults.length})</span>
-                  <ArrowRight className="w-5 h-5" />
-                </button>
-
+              <div className="pt-1 space-y-2.5">
                 <button
                   type="button"
                   onClick={() => executeSaveMultiItems(sessionUser?.id)}
                   disabled={isSaving || multiResults.length === 0}
-                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] font-bold text-base text-[var(--color-text)] flex items-center justify-center gap-2 shadow-2xs hover:bg-[var(--color-primary-soft)] transition active:scale-[.98]"
+                  className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-extrabold text-base flex items-center justify-center gap-2.5 shadow-md active:scale-[.98] transition disabled:opacity-60"
                 >
-                  {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <span>Spara alla {multiResults.length} direkt som de är</span>}
+                  {isSaving ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <span>Spara {multiResults.length === 1 ? "föremålet" : `alla ${multiResults.length} föremål`}</span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setMultiReviewStep(0)}
+                  disabled={isSaving}
+                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] font-bold text-base text-[var(--color-text)] flex items-center justify-center gap-2 hover:bg-[var(--color-primary-soft)] transition active:scale-[.98]"
+                >
+                  <span>Granska ett i taget</span>
+                  <ArrowRight className="w-5 h-5" />
                 </button>
               </div>
             </div>
