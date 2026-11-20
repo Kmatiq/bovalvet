@@ -51,7 +51,6 @@ import {
   Archive, 
   RotateCcw, 
   Scale, 
-  WifiOff, 
   Layers, 
   MousePointerClick, 
   Download, 
@@ -381,9 +380,6 @@ export default function HomePage() {
   const [currentNav, setCurrentNav] = useState<"home" | "rooms" | "insurance" | "more">("home");
   const [sessionUser, setSessionUser] = useState<any>(null);
 
-  const [isOnline, setIsOnline] = useState(true);
-  const [offlineQueue, setOfflineQueue] = useState<any[]>([]);
-
   const [displayName, setDisplayName] = useState<string>("");
   const [displayNameInput, setDisplayNameInput] = useState<string>("");
   const [isUpdatingName, setIsUpdatingName] = useState(false);
@@ -422,7 +418,6 @@ export default function HomePage() {
   const [result, setResult] = useState<ItemAnalysisResult | null>(null);
   const [multiResults, setMultiResults] = useState<ItemAnalysisResult[]>([]);
   const [multiReviewStep, setMultiReviewStep] = useState<number | null>(null);
-  const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
 
   const [savedSuccessInfo, setSavedSuccessInfo] = useState<{
     count: number;
@@ -742,72 +737,148 @@ export default function HomePage() {
     };
   }, [isAnalyzing]);
 
-  useEffect(() => {
-    setIsOnline(navigator.onLine);
+  const fetchProperties = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("properties")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: true });
 
-    const handleOnline = () => {
-      setIsOnline(true);
-      showToast("Åter ansluten till nätet ✓");
-      processOfflineQueue();
-    };
+      if (error) throw error;
 
-    const handleOffline = () => {
-      setIsOnline(false);
-      showToast("Tappade anslutningen. Offlineläge aktivt.");
-    };
-
-    window.addEventListener("online", handleOnline);
-    window.addEventListener("offline", handleOffline);
-
-    const savedQueue = localStorage.getItem("bovalvet_offline_queue");
-    if (savedQueue) {
-      try {
-        setOfflineQueue(JSON.parse(savedQueue));
-      } catch (e) {
-        console.error(e);
+      if (data && data.length > 0) {
+        setProperties(data);
+        const current = selectedProperty ? data.find((p) => p.id === selectedProperty.id) || data[0] : data[0];
+        setSelectedProperty(current);
+        fetchVaultStats(userId, current.id);
+        fetchVaultItems(userId, current.id);
+      } else {
+        const { data: newProp } = await supabase
+          .from("properties")
+          .insert({
+            user_id: userId,
+            name: "Hemma",
+            property_type: "Bostadsrätt",
+            coverage_limit_sek: 1000000,
+            deductible_sek: 1500,
+            living_area_sqm: 75,
+          })
+          .select()
+          .single();
+        if (newProp) {
+          setProperties([newProp]);
+          setSelectedProperty(newProp);
+          fetchVaultStats(userId, newProp.id);
+          fetchVaultItems(userId, newProp.id);
+        }
       }
+    } catch (e) {
+      console.error("Kunde inte hämta bostäder:", e);
     }
+  };
 
-    return () => {
-      window.removeEventListener("online", handleOnline);
-      window.removeEventListener("offline", handleOffline);
-    };
-  }, []);
+  const fetchPropertyMembers = async (propertyId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("property_members")
+        .select("*")
+        .eq("property_id", propertyId);
 
-  const processOfflineQueue = async () => {
-    const queue = JSON.parse(localStorage.getItem("bovalvet_offline_queue") || "[]");
-    if (queue.length === 0 || !sessionUser) return;
-
-    showToast(`Synkar ${queue.length} offline-sparade föremål...`);
-
-    const remainingQueue = [];
-    for (const item of queue) {
-      try {
-        await supabase.from("items").insert({
-          user_id: sessionUser.id,
-          property_id: selectedProperty?.id || null,
-          title: item.title,
-          category: item.category,
-          room: item.room,
-          brand: item.brand,
-          model: item.model,
-          estimated_replacement_cost_sek: item.estimated_replacement_cost_sek,
-          market_value_sek: item.market_value_sek,
-          condition: item.condition,
-          is_archived: false
-        });
-      } catch (err) {
-        remainingQueue.push(item);
+      if (!error && data) {
+        setPropertyMembers(data);
       }
+    } catch (e) {
+      console.error("Kunde inte hämta hushållsmedlemmar:", e);
     }
+  };
 
-    localStorage.setItem("bovalvet_offline_queue", JSON.stringify(remainingQueue));
-    setOfflineQueue(remainingQueue);
-    if (sessionUser) {
-      fetchVaultStats(sessionUser.id, selectedProperty?.id);
-      fetchVaultItems(sessionUser.id, selectedProperty?.id);
+  const handleInviteMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProperty || !inviteEmail.trim()) return;
+
+    setIsInviting(true);
+    try {
+      const { error } = await supabase.from("property_members").insert({
+        property_id: selectedProperty.id,
+        user_email: inviteEmail.trim(),
+        role: "member"
+      });
+
+      if (error) throw error;
+
+      setInviteEmail("");
+      await fetchPropertyMembers(selectedProperty.id);
+      showToast("Inbjudan skickad ✓");
+    } catch (err: any) {
+      alert(`Kunde inte bjuda in: ${err.message}`);
+    } finally {
+      setIsInviting(false);
     }
-    showToast("Synkning klar ✓");
+  };
+
+  const fetchVaultStats = async (userId: string, propertyId?: string) => {
+    try {
+      let query = supabase.from("items").select("estimated_replacement_cost_sek").eq("user_id", userId).eq("is_archived", false);
+      if (propertyId) query = query.eq("property_id", propertyId);
+      const { data, error } = await query;
+
+      if (!error && data) {
+        const total = data.reduce((sum, item) => sum + (Number(item.estimated_replacement_cost_sek) || 0), 0);
+        setTotalValuationSek(total);
+      }
+    } catch (e) {
+      console.error("Kunde inte hämta statistik:", e);
+    }
+  };
+
+  const fetchVaultItems = async (userId: string, propertyId?: string) => {
+    try {
+      let query = supabase.from("items").select("*").eq("user_id", userId).order("created_at", { ascending: false });
+      if (propertyId) query = query.eq("property_id", propertyId);
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      if (data) {
+        const itemsWithSignedUrls: VaultItem[] = await Promise.all(
+          data.map(async (item) => {
+            let rawPaths: string[] = [];
+            if (Array.isArray(item.image_paths) && item.image_paths.length > 0) {
+              rawPaths = item.image_paths;
+            } else if (item.image_path || item.photo_path) {
+              rawPaths = [item.image_path || item.photo_path];
+            }
+
+            const signedUrls: string[] = [];
+            for (const path of rawPaths) {
+              if (path) {
+                const { data: urlData } = await supabase.storage.from("item-photos").createSignedUrl(path, 3600);
+                if (urlData?.signedUrl) signedUrls.push(urlData.signedUrl);
+              }
+            }
+
+            let receiptSigned = "";
+            if (item.receipt_path) {
+              const { data: rUrlData } = await supabase.storage.from("item-photos").createSignedUrl(item.receipt_path, 3600);
+              receiptSigned = rUrlData?.signedUrl || "";
+            }
+
+            return { 
+              ...item, 
+              is_archived: Boolean(item.is_archived),
+              image_paths: rawPaths,
+              imageUrls: signedUrls,
+              imageUrl: signedUrls[0] || "",
+              receiptUrl: receiptSigned 
+            };
+          })
+        );
+        setVaultItems(itemsWithSignedUrls);
+      }
+    } catch (err: any) {
+      console.error("Kunde inte hämta valv:", err);
+    }
   };
 
   const processPendingGuestData = async (userId: string) => {
@@ -958,149 +1029,6 @@ export default function HomePage() {
     }
   };
 
-  const fetchProperties = async (userId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from("properties")
-        .select("*")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: true });
-
-      if (error) throw error;
-
-      if (data && data.length > 0) {
-        setProperties(data);
-        const current = selectedProperty ? data.find((p) => p.id === selectedProperty.id) || data[0] : data[0];
-        setSelectedProperty(current);
-        fetchVaultStats(userId, current.id);
-        fetchVaultItems(userId, current.id);
-      } else {
-        const { data: newProp } = await supabase
-          .from("properties")
-          .insert({
-            user_id: userId,
-            name: "Hemma",
-            property_type: "Bostadsrätt",
-            coverage_limit_sek: 1000000,
-            deductible_sek: 1500,
-            living_area_sqm: 75,
-          })
-          .select()
-          .single();
-        if (newProp) {
-          setProperties([newProp]);
-          setSelectedProperty(newProp);
-          fetchVaultStats(userId, newProp.id);
-          fetchVaultItems(userId, newProp.id);
-        }
-      }
-    } catch (e) {
-      console.error("Kunde inte hämta bostäder:", e);
-    }
-  };
-
-  const fetchPropertyMembers = async (propertyId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from("property_members")
-        .select("*")
-        .eq("property_id", propertyId);
-
-      if (!error && data) {
-        setPropertyMembers(data);
-      }
-    } catch (e) {
-      console.error("Kunde inte hämta hushållsmedlemmar:", e);
-    }
-  };
-
-  const handleInviteMember = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedProperty || !inviteEmail.trim()) return;
-
-    setIsInviting(true);
-    try {
-      const { error } = await supabase.from("property_members").insert({
-        property_id: selectedProperty.id,
-        user_email: inviteEmail.trim(),
-        role: "member"
-      });
-
-      if (error) throw error;
-
-      setInviteEmail("");
-      await fetchPropertyMembers(selectedProperty.id);
-      showToast("Inbjudan skickad ✓");
-    } catch (err: any) {
-      alert(`Kunde inte bjuda in: ${err.message}`);
-    } finally {
-      setIsInviting(false);
-    }
-  };
-
-  const fetchVaultStats = async (userId: string, propertyId?: string) => {
-    try {
-      let query = supabase.from("items").select("estimated_replacement_cost_sek").eq("user_id", userId).eq("is_archived", false);
-      if (propertyId) query = query.eq("property_id", propertyId);
-      const { data, error } = await query;
-
-      if (!error && data) {
-        const total = data.reduce((sum, item) => sum + (Number(item.estimated_replacement_cost_sek) || 0), 0);
-        setTotalValuationSek(total);
-      }
-    } catch (e) {
-      console.error("Kunde inte hämta statistik:", e);
-    }
-  };
-
-  const fetchVaultItems = async (userId: string, propertyId?: string) => {
-    try {
-      let query = supabase.from("items").select("*").eq("user_id", userId).order("created_at", { ascending: false });
-      if (propertyId) query = query.eq("property_id", propertyId);
-
-      const { data, error } = await query;
-      if (error) throw error;
-
-      if (data) {
-        const itemsWithSignedUrls: VaultItem[] = await Promise.all(
-          data.map(async (item) => {
-            let rawPaths: string[] = [];
-            if (Array.isArray(item.image_paths) && item.image_paths.length > 0) {
-              rawPaths = item.image_paths;
-            } else if (item.image_path || item.photo_path) {
-              rawPaths = [item.image_path || item.photo_path];
-            }
-
-            const signedUrls: string[] = [];
-            for (const path of rawPaths) {
-              if (path) {
-                const { data: urlData } = await supabase.storage.from("item-photos").createSignedUrl(path, 3600);
-                if (urlData?.signedUrl) signedUrls.push(urlData.signedUrl);
-              }
-            }
-
-            let receiptSigned = "";
-            if (item.receipt_path) {
-              const { data: rUrlData } = await supabase.storage.from("item-photos").createSignedUrl(item.receipt_path, 3600);
-              receiptSigned = rUrlData?.signedUrl || "";
-            }
-
-            return { 
-              ...item, 
-              is_archived: Boolean(item.is_archived),
-              image_paths: rawPaths,
-              imageUrls: signedUrls,
-              imageUrl: signedUrls[0] || "",
-              receiptUrl: receiptSigned 
-            };
-          })
-        );
-        setVaultItems(itemsWithSignedUrls);
-      }
-    } catch (err: any) {
-      console.error("Kunde inte hämta valv:", err);
-    }
-  };
 
   const handleConfirmDelete = async () => {
     if (!itemToDelete) return;
@@ -1450,7 +1378,6 @@ export default function HomePage() {
     setResult(null);
     setMultiResults([]);
     setMultiReviewStep(null);
-    setHighlightedIndex(null);
 
     setIsAnalyzing(true);
     setScanMessageIndex(0);
@@ -1464,18 +1391,9 @@ export default function HomePage() {
 
       if (!navigator.onLine) {
         setIsAnalyzing(false);
-        setResult({
-          title: "Föremål (Sparat offline)",
-          category: "Övrigt hem & inredning",
-          brand: "",
-          model: "",
-          estimated_replacement_cost_sek: 1000,
-          market_value_sek: 500,
-          condition: "Mycket gott",
-          serial_number_hint: "",
-          confidence: 1
-        });
-        showToast("Offlineläge: Fyll i uppgifter manuellt och spara.");
+        setPreviewUrl(null);
+        setBase64ForSave(null);
+        alert("Ingen internetanslutning. Kontrollera din uppkoppling och försök igen.");
         return;
       }
 
@@ -1548,18 +1466,10 @@ export default function HomePage() {
       }
     } catch (err: unknown) {
       setIsAnalyzing(false);
-      setResult({
-        title: "Föremål (Sparat offline)",
-        category: "Övrigt hem & inredning",
-        brand: "",
-        model: "",
-        estimated_replacement_cost_sek: 1000,
-        market_value_sek: 500,
-        condition: "Mycket gott",
-        serial_number_hint: "",
-        confidence: 1
-      });
-      showToast("Ingen anslutning. Sparad i offline-kö.");
+      console.error("Bildanalys misslyckades:", err);
+      setPreviewUrl(null);
+      setBase64ForSave(null);
+      alert("Kunde inte läsa av bilden just nu. Kontrollera uppkopplingen och försök igen.");
     } finally {
       setIsAnalyzing(false);
     }
@@ -1977,13 +1887,6 @@ export default function HomePage() {
     <div className="min-h-screen bg-[var(--color-bg)] md:bg-[#ECE4D8] text-[var(--color-text)] flex justify-center selection:bg-[var(--color-primary-soft)] selection:text-[var(--color-primary)]">
       <div className="w-full max-w-[480px] min-h-screen flex flex-col relative pb-32 bg-[var(--color-bg)] md:shadow-md md:border-x md:border-[var(--color-border)]">
 
-        {!isOnline && (
-          <div className="bg-amber-600 text-white text-xs font-bold px-4 py-2 text-center flex items-center justify-center gap-2 z-30">
-            <WifiOff className="w-4 h-4" />
-            <span>Offlineläge aktivt ({offlineQueue.length} i kö)</span>
-          </div>
-        )}
-
         {!showRoomPickerScreen && !isAnalyzing && !result && multiResults.length === 0 && !editingItem && !showArchiveHub && (
           <header className="h-16 px-5 flex items-center justify-between z-20">
             <div className="flex items-center gap-2.5">
@@ -2195,9 +2098,9 @@ export default function HomePage() {
                 <button
                   type="button"
                   onClick={() => setShowRoomPickerScreen(true)}
-                  className="min-h-[40px] px-3.5 rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)] font-semibold text-sm flex items-center gap-1.5 hover:opacity-90 transition active:scale-95"
+                  className="min-h-[44px] px-3.5 rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary)] font-semibold text-sm flex items-center gap-1.5 hover:opacity-90 transition active:scale-95"
                 >
-                  <MapPin className="w-3.5 h-3.5" />
+                  <MapPin className="w-4 h-4" />
                   <span>Rum: <strong>{activeRoom}</strong></span>
                 </button>
               </div>
@@ -2206,121 +2109,98 @@ export default function HomePage() {
                 <h1 className="text-[22px] font-extrabold text-[var(--color-text)]">
                   Hittade {multiResults.length} föremål i {activeRoom}
                 </h1>
-                <p className="text-sm text-[var(--color-text-soft)] mt-0.5">
-                  Sammanlagt nypris: <strong className="text-[var(--color-text)] font-extrabold">{multiResults.reduce((sum, item) => sum + (Number(item.estimated_replacement_cost_sek) || 0), 0).toLocaleString("sv-SE")} kr</strong>
+                <p className="text-base text-[var(--color-text-soft)] mt-1">
+                  Stämmer listan? Tryck på <strong className="text-[var(--color-text)]">✕</strong> för att ta bort det du inte vill spara.
                 </p>
               </div>
 
               {previewUrl && (
-                <div className="relative rounded-3xl overflow-hidden bg-black border border-[var(--color-border)] shadow-md select-none">
+                <div className="rounded-3xl overflow-hidden bg-[var(--color-surface)] border border-[var(--color-border)] shadow-xs select-none">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={previewUrl} alt="Översiktsfoto" className="w-full h-auto max-h-[300px] object-contain block mx-auto opacity-95" />
-                  
-                  {multiResults.map((item, idx) => {
-                    if (!item.box_2d || item.box_2d.length < 4) return null;
-                    const [ymin, xmin, ymax, xmax] = item.box_2d;
-                    const isHighlighted = highlightedIndex === idx;
-
-                    return (
-                      <div
-                        key={idx}
-                        onClick={() => setMultiReviewStep(idx)}
-                        style={{
-                          top: `${(ymin / 1000) * 100}%`,
-                          left: `${(xmin / 1000) * 100}%`,
-                          width: `${Math.max(10, ((xmax - xmin) / 1000) * 100)}%`,
-                          height: `${Math.max(8, ((ymax - ymin) / 1000) * 100)}%`,
-                        }}
-                        className={`absolute border-2 rounded-xl cursor-pointer transition-all duration-200 flex items-start justify-start p-1 ${
-                          isHighlighted 
-                            ? "border-[var(--color-primary)] bg-[var(--color-primary)]/35 ring-4 ring-white" 
-                            : "border-white/80 bg-black/25 hover:border-[var(--color-primary)] hover:bg-black/40"
-                        }`}
-                        title={item.title}
-                      >
-                        <span className="w-6 h-6 rounded-full bg-[var(--color-primary)] text-white text-xs font-black flex items-center justify-center shadow-lg border border-white">
-                          {idx + 1}
-                        </span>
-                      </div>
-                    );
-                  })}
-                  
-                  <div className="absolute bottom-2.5 right-2.5 bg-black/70 backdrop-blur-md px-3 py-1 rounded-full text-xs font-semibold text-white pointer-events-none">
-                    Klicka på en siffra eller rad för att granska
-                  </div>
+                  <img src={previewUrl} alt="Ditt foto" className="w-full h-auto max-h-[220px] object-contain block mx-auto" />
                 </div>
               )}
 
-              <div className="space-y-2 pt-1">
-                {multiResults.map((item, idx) => {
-                  const isHighlighted = highlightedIndex === idx;
-                  return (
-                    <div 
-                      key={idx}
-                      onMouseEnter={() => setHighlightedIndex(idx)}
-                      onMouseLeave={() => setHighlightedIndex(null)}
-                      className={`p-3 rounded-2xl border transition flex items-center justify-between gap-3 ${
-                        isHighlighted 
-                          ? "bg-[var(--color-primary-soft)] border-[var(--color-primary)] shadow-card" 
-                          : "bg-[var(--color-surface)] border-[var(--color-border)] shadow-xs"
-                      }`}
+              <ul className="space-y-3">
+                {multiResults.map((item, idx) => (
+                  <li
+                    key={idx}
+                    className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-xs flex items-center gap-2 pr-2"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setMultiReviewStep(idx)}
+                      className="min-h-[88px] flex items-center gap-4 min-w-0 flex-1 p-3 text-left rounded-2xl active:scale-[.99] transition"
+                      aria-label={`Granska ${item.title}`}
                     >
-                      <div 
-                        onClick={() => setMultiReviewStep(idx)}
-                        className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer"
-                      >
-                        <div className="w-7 h-7 rounded-full bg-[var(--color-primary)] text-white font-black text-xs flex items-center justify-center flex-shrink-0 shadow-xs">
-                          {idx + 1}
-                        </div>
-
-                        <div className="w-12 h-12 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border)] overflow-hidden flex-shrink-0 flex items-center justify-center">
-                          {item.previewCropUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={item.previewCropUrl} alt={item.title} className="w-full h-full object-cover" />
-                          ) : (
-                            <span className="text-xl">{getRoomEmoji(activeRoom)}</span>
-                          )}
-                        </div>
-
-                        <div className="min-w-0 flex-1">
-                          <b className="text-base text-[var(--color-text)] block truncate">{item.title}</b>
-                          <span className="text-sm font-extrabold text-[var(--color-text)] block">
-                            {Number(item.estimated_replacement_cost_sek).toLocaleString("sv-SE")} kr
-                          </span>
-                        </div>
+                      <div className="w-16 h-16 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border)] overflow-hidden flex-shrink-0 flex items-center justify-center">
+                        {item.previewCropUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={item.previewCropUrl} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <span className="text-2xl">{getRoomEmoji(activeRoom)}</span>
+                        )}
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => removeMultiItem(idx)}
-                        className="w-10 h-10 rounded-xl flex items-center justify-center text-[var(--color-text-soft)] hover:text-rose-600 hover:bg-rose-50 transition active:scale-95 flex-shrink-0"
-                        title="Ta bort föremål"
-                        aria-label={`Ta bort ${item.title}`}
-                      >
-                        <X className="w-5 h-5" />
-                      </button>
-                    </div>
-                  );
-                })}
+                      <div className="min-w-0 flex-1">
+                        <b className="text-base text-[var(--color-text)] block leading-snug line-clamp-2">{item.title}</b>
+                        <span className="text-base font-extrabold text-[var(--color-text)] block mt-0.5">
+                          {Number(item.estimated_replacement_cost_sek).toLocaleString("sv-SE")} kr
+                        </span>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => removeMultiItem(idx)}
+                      className="w-12 h-12 rounded-xl flex items-center justify-center text-[var(--color-text-soft)] hover:text-rose-600 hover:bg-rose-50 transition active:scale-95 flex-shrink-0"
+                      aria-label={`Ta bort ${item.title}`}
+                    >
+                      <X className="w-6 h-6" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+
+              <div className="rounded-2xl bg-[var(--color-primary-soft)] border border-[var(--color-border)] p-4 space-y-1.5">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="text-base text-[var(--color-text)]">Sammanlagt nypris</span>
+                  <strong className="text-lg font-extrabold text-[var(--color-text)]">
+                    {multiResults.reduce((sum, item) => sum + (Number(item.estimated_replacement_cost_sek) || 0), 0).toLocaleString("sv-SE")} kr
+                  </strong>
+                </div>
+                {sessionUser && (
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-sm text-[var(--color-text-soft)]">Hemmets värde efter sparande</span>
+                    <span className="text-sm font-bold text-[var(--color-primary)]">
+                      {(totalValuationSek + multiResults.reduce((sum, item) => sum + (Number(item.estimated_replacement_cost_sek) || 0), 0)).toLocaleString("sv-SE")} kr
+                    </span>
+                  </div>
+                )}
               </div>
 
-              <div className="pt-2 space-y-2.5">
-                <button
-                  type="button"
-                  onClick={() => setMultiReviewStep(0)}
-                  className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-extrabold text-base flex items-center justify-center gap-2.5 shadow-md active:scale-[.98] transition"
-                >
-                  <span>Gå igenom föremålen steg för steg (1 av {multiResults.length})</span>
-                  <ArrowRight className="w-5 h-5" />
-                </button>
-
+              <div className="pt-1 space-y-2.5">
                 <button
                   type="button"
                   onClick={() => executeSaveMultiItems(sessionUser?.id)}
                   disabled={isSaving || multiResults.length === 0}
-                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] font-bold text-base text-[var(--color-text)] flex items-center justify-center gap-2 shadow-2xs hover:bg-[var(--color-primary-soft)] transition active:scale-[.98]"
+                  className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-extrabold text-base flex items-center justify-center gap-2.5 shadow-md active:scale-[.98] transition disabled:opacity-60"
                 >
-                  {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <span>Spara alla {multiResults.length} direkt som de är</span>}
+                  {isSaving ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <span>Spara {multiResults.length === 1 ? "föremålet" : `alla ${multiResults.length} föremål`}</span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setMultiReviewStep(0)}
+                  disabled={isSaving}
+                  className="min-h-[52px] w-full rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] font-bold text-base text-[var(--color-text)] flex items-center justify-center gap-2 hover:bg-[var(--color-primary-soft)] transition active:scale-[.98]"
+                >
+                  <span>Granska ett i taget</span>
+                  <ArrowRight className="w-5 h-5" />
                 </button>
               </div>
             </div>
@@ -2423,7 +2303,7 @@ export default function HomePage() {
                     onClick={() => setMultiReviewStep(multiReviewStep + 1)}
                     className="min-h-[56px] w-full rounded-2xl bg-[var(--color-primary)] text-white font-extrabold text-base flex items-center justify-center gap-2 shadow-sm transition active:scale-[.98]"
                   >
-                    <span>Godkänn & Nästa ({multiReviewStep + 2} av {multiResults.length}) →</span>
+                    <span>Godkänn & gå till nästa föremål →</span>
                   </button>
                 ) : (
                   <button
@@ -2587,6 +2467,22 @@ export default function HomePage() {
                     >
                       <Camera className="w-5 h-5" />
                       <span>Fota ditt första föremål</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManualFormData({
+                          room: activeRoom,
+                          category: "Övrigt hem & inredning",
+                          condition: "Mycket gott",
+                        });
+                        setShowManualModal(true);
+                      }}
+                      className="min-h-[52px] w-full rounded-2xl text-[var(--color-text-soft)] font-semibold text-base flex items-center justify-center gap-2 active:scale-[.98] transition"
+                    >
+                      <Plus className="w-5 h-5" />
+                      <span>Lägg till föremål manuellt</span>
                     </button>
                   </div>
 
@@ -3111,6 +3007,11 @@ export default function HomePage() {
                   )}
                 </div>
               </div>
+
+              <p className="text-sm text-[var(--color-text-soft)] text-center pt-2 pb-4">
+                BoValvet version {process.env.APP_VERSION}
+                {process.env.APP_BUILD ? ` · ${process.env.APP_BUILD}` : ""}
+              </p>
             </div>
           )}
 

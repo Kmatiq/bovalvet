@@ -45,7 +45,7 @@ Gränssnittet i BoValvet riktar sig till slutanvändare utan teknikintresse. Fö
 * **Frontend:** [Next.js](https://nextjs.org/) (App Router, React 19, TypeScript)
 * **Styling:** [Tailwind CSS v4](https://tailwindcss.com/) & [Lucide React](https://lucide.dev/)
 * **Backend & Databas:** [Supabase](https://supabase.com/) (PostgreSQL, Supabase Auth med OAuth/e-post, Supabase Storage med privat bucket `item-photos` och tidsbegränsade signed URLs)
-* **AI & Datorseende:** Google Gemini API (`@google/genai`, modellen `gemini-2.5-flash`)
+* **AI & Datorseende:** Google Gemini API (`@google/genai`, modellen `gemini-3.8-flash`)
 * **Dokumentgenerering:** [jsPDF](https://github.com/parallax/jsPDF) & [jspdf-autotable](https://github.com/simonbengtsson/jsPDF-AutoTable)
 * **Hosting:** Vercel (kopplat till repot `Kmatiq/bovalvet` på branch `main`)
 
@@ -64,6 +64,8 @@ Gränssnittet i BoValvet riktar sig till slutanvändare utan teknikintresse. Fö
 │   ├── layout.tsx                # Rot-layout och metadata
 │   ├── page.tsx                  # BoValvets huvudapplikation och mobilskal
 │   └── DESIGN.md                 # UI/UX- och typografiregler
+├── DOKUMENTATION.md              # Fullständig projektdokumentation, historik och teknisk analys
+├── ROADMAP.md                    # Handlingsplan och status
 ├── lib/
 │   ├── exportVault.ts            # PDF- och Excel/Numbers-export (grupperat per rum)
 │   ├── sanitizeImage.ts          # Klientsidig EXIF-rensning och bildoptimering
